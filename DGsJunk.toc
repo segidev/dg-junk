@@ -1,0 +1,11 @@
+## Interface: 11509
+## Title: DGs Junk
+## Notes: Bag-cleanup helper - cheapest junk + cheapest cheap item, delete/ignore, vendor + AH price
+## Author: Vokra
+## IconTexture: Interface\Icons\INV_Misc_Bag_10
+## Category: Bags & Inventory
+## Version: 1.0
+## OptionalDeps: Auctionator
+## SavedVariables: DGsJunkDB
+
+DGsJunk.lua
