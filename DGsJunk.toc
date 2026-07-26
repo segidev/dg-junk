@@ -7,5 +7,6 @@
 ## Version: 1.0
 ## OptionalDeps: Auctionator
 ## SavedVariables: DGsJunkDB
+## X-Curse-Project-ID: 1626276
 
 DGsJunk.lua

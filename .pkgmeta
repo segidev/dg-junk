@@ -1,0 +1,8 @@
+package-as: DGsJunk
+
+enable-nolib-creation: no
+
+ignore:
+  - docs
+  - dist
+  - .gitignore

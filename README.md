@@ -4,6 +4,8 @@ A lightweight bag-cleanup helper for **WoW Classic Era / Hardcore** (interface 1
 Standalone. [Auctionator](https://www.curseforge.com/wow/addons/auctionator) is optional and only
 used for auction-house prices.
 
+Download on **[CurseForge](https://www.curseforge.com/wow/addons/dgs-junk)**.
+
 ## What it does
 
 Bag space is the real currency in Classic. DGs Junk always knows the two items you should throw away
