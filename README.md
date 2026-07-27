@@ -6,6 +6,11 @@ used for auction-house prices.
 
 Download on **[CurseForge](https://www.curseforge.com/wow/addons/dgs-junk)**.
 
+![Full bags: pick what to discard](docs/images/full-bags-dialog.png)
+
+Bags full? Click the loot and DGs Junk shows what it would cost you: the loot on the left, your
+cheapest junk and cheapest non-junk on the right with prices, the cheaper one recommended.
+
 ## What it does
 
 Bag space is the real currency in Classic. DGs Junk always knows the two items you should throw away
@@ -32,6 +37,9 @@ auction-house value. Hover for the item tooltip and the available actions.
 - **Loot verdict**. Hovering an item in the loot window tells you *Loot it* or *Skip*, judged
   against the cheapest thing you would have to discard, the same item the full-bags dialog
   recommends, so the two can never disagree. Quest items always read **Quest item: Take it!**
+- **Coloured loot rows**. The loot window itself is tinted per row: green when the item is worth
+  more than your cheapest junk, red when it is not, so you can read the whole window at a glance
+  without hovering anything.
 - **Full bags?** Clicking a loot item with no free slot opens a pick-an-item dialog: the loot on
   the left, your cheapest junk and cheapest non-junk on the right with prices, the cheaper one
   recommended. Limited to Common quality and below, so the deletion is instant.
@@ -48,11 +56,6 @@ auction-house value. Hover for the item tooltip and the available actions.
 Quest items are never suggested, never auto-sold and never deletable, even if marked.
 
 ## Screenshots
-
-![Full bags: pick what to discard](docs/images/full-bags-dialog.png)
-
-Bags full? Click the loot and DGs Junk shows what it would cost you: the loot on the left, your
-cheapest junk and cheapest non-junk on the right with prices, the cheaper one recommended.
 
 <table>
 <tr>
@@ -94,8 +97,9 @@ Loot-assist, debug logging and clearing the log are toggled inside that window
 
 ## Settings window
 
-- **Settings** (opens here), loot-assist, suggest-by-AH, always-show, minimap button, auto-sell,
-  frame scale, the profile dropdown and its copy buttons, reset icon position.
+- **Settings** (opens here), loot-assist, colour loot rows, suggest-by-AH, show item frames,
+  always-show, minimap button, auto-sell, frame scale, the profile dropdown and its copy buttons,
+  reset icon position.
 - **Ignored**, manage the ignore list (remove individual entries, or reset Junk / Normal / All).
 - **Junk**, the mark list described above.
 - **Log**, scrollable, copyable diagnostic log. Debug messages go here, never to chat.
