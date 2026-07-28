@@ -52,6 +52,10 @@ local function EndDrag()   dragging = false end
 -- OnHide, so it can never outlive the dialog it belongs to.
 local previewMode = false
 local PreviewBtnSync    -- fwd decl: keeps the Debug tab's toggle label in sync
+-- Declared up here (assigned in BuildConfirm) so Update() can reach the dialog:
+-- every refresh path runs through Update(), and the dialog has to be one of the
+-- things it refreshes.
+local confirmFrame
 
 -- Items we never delete (protection list), e.g. Hearthstone.
 local exclusions = { [6948] = true, [184871] = true, [260221] = true }
@@ -529,6 +533,14 @@ end
 
 -------------------------------------------------------------------- refresh
 Update = function()
+    -- The comparison dialog is rebuilt FIRST and outside the master-hide check:
+    -- it is a modal decision the user is looking at right now, and it must agree
+    -- with the rest of the addon even when the floating icons are switched off.
+    -- Ignoring or marking an item from anywhere - the icons, a bag menu, the
+    -- settings window - lands here, so the dialog re-ranks with everything else.
+    if confirmFrame and confirmFrame:IsShown() and confirmFrame.SyncLists then
+        confirmFrame.SyncLists()
+    end
     if DB and DB.showFrames == false then      -- master hide (minimap left-click / settings)
         junkIcon:Hide()
         cheapIcon:Hide()
@@ -922,7 +934,6 @@ end
 -- Custom confirm dialog: loot item on the left, the two cheapest replace
 -- candidates (junk + non-junk) on the right. Click a candidate to delete it and
 -- loot; hover any icon to compare; price shown under each icon.
-local confirmFrame
 -- The dialog only makes sense while the loot window is open: its whole promise is
 -- "delete this, then loot that". If the loot closes (you ran away, the corpse
 -- despawned, someone else took it) the slot is gone, so the dialog must go too -
@@ -1084,9 +1095,8 @@ local function BuildConfirm()
             dbg("preview: ignore suppressed for item " .. tostring(rec.id))
             return
         end
-        IgnoreRecord(rec)                                   -- logs via act() and prints
-        if f.SyncLists then f.SyncLists() end
-        Update()
+        IgnoreRecord(rec)          -- logs via act() and prints
+        Update()                   -- rebuilds the icons, the settings lists AND this dialog
     end
 
     f.lootBtn = Slot("|cff33ff99Loot|r", 40)
@@ -1268,8 +1278,10 @@ local function BuildConfirm()
 
     -- Bags changed under an open dialog: rebuild both lists so the records cannot
     -- go stale, keeping your position where it still exists.
+    -- Runs in preview too. Only the loot item on the left is a fixed snapshot
+    -- (re-rolling it on every bag change would be unusable); the candidates are
+    -- live, so ignoring an item elsewhere drops it out of the preview as well.
     f.SyncLists = function()
-        if f.preview then dbg("resync: skipped, preview is a snapshot"); return end
         local beforeJ, beforeO = f.junkIdx or 1, f.otherIdx or 1
         local _, _, jl, ol = LootClearCandidates()
         f.junkList, f.otherList = jl or {}, ol or {}
