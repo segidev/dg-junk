@@ -1,5 +1,20 @@
-# Git hooks are run by sh (Git for Windows). With core.autocrlf=true they would be
-# checked out with CRLF, and sh fails on "#!/bin/sh\r" with a bad-interpreter
-# error - so the push gate would silently stop working on a fresh clone.
-.githooks/* text eol=lf
-*.sh        text eol=lf
+# LF everywhere, in the repo AND in the working tree.
+#
+# core.autocrlf is a per-machine setting that stores LF but checks out CRLF, so
+# the file on disk never matches the file in git. That mismatch is not cosmetic:
+# it makes every `git add` print a conversion warning, it breaks tools that
+# anchor a regex to end-of-line (our release preflight did exactly that), and it
+# turns "#!/bin/sh" into "#!/bin/sh\r", which sh rejects as a bad interpreter -
+# silently disabling the pre-push gate on a fresh clone.
+#
+# Nothing in this project wants CRLF: the WoW client reads LF Lua happily, the
+# BigWigs packager does not care, and every editor on Windows has handled LF for
+# years. Settling it here rather than in a git config means it holds for any
+# clone on any machine, whatever that machine's autocrlf happens to be.
+* text=auto eol=lf
+
+# Binary: never touch these, and never try to diff them as text.
+*.png  binary
+*.jpg  binary
+*.zip  binary
+*.tga  binary
