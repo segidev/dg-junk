@@ -809,10 +809,14 @@ local function BagsFull()
     return true
 end
 
--- Cheapest deletable JUNK and cheapest deletable NON-JUNK candidate for making
--- room. "Deletable" = quality <= Common (instant delete, no confirm popup).
+-- Deletable JUNK and deletable NON-JUNK candidates for making room, cheapest
+-- first. "Deletable" = quality <= Common (instant delete, no confirm popup), so
+-- cycling through the lists can never walk into your greens.
+-- Returns the cheapest of each (what the tooltip verdict and the row tinting
+-- use, unchanged) plus the full ranked lists the dialog cycles through.
+local MAX_CANDIDATES = 10       -- deep enough to find an alternative, short enough to page through
 LootClearCandidates = function()
-    local junk, other
+    local junkList, otherList = {}, {}
     for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
         for slot = 1, (GetContainerNumSlots(bag) or 0) do
             local id = GetContainerItemID(bag, slot)
@@ -827,16 +831,23 @@ LootClearCandidates = function()
                                       worthEach = worthEach, count = SlotCount(bag, slot) }
                         if IsJunk(id) then
                             rec.junk = true
-                            if not junk or value < junk.value then junk = rec end
+                            junkList[#junkList + 1] = rec
                         elseif each > 0 then
-                            if not other or value < other.value then other = rec end
+                            otherList[#otherList + 1] = rec
                         end
                     end
                 end
             end
         end
     end
-    return junk, other
+    -- Cheapest first, and only the cheapest MAX_CANDIDATES are offered: past that
+    -- you are picking through things you actually want to keep.
+    local function byValue(a, b) return a.value < b.value end
+    table.sort(junkList, byValue)
+    table.sort(otherList, byValue)
+    while #junkList  > MAX_CANDIDATES do table.remove(junkList)  end
+    while #otherList > MAX_CANDIDATES do table.remove(otherList) end
+    return junkList[1], otherList[1], junkList, otherList
 end
 
 local function DoLootClear(rec, slot)
@@ -870,7 +881,7 @@ local function CloseLootConfirm()
 end
 local function BuildConfirm()
     local f = CreateFrame("Frame", "DGsJunkConfirm", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(440, 224)   -- 210 + one line, the icons carry a vendor and an AH row
+    f:SetSize(440, 250)   -- vendor + AH row under each icon, plus the bottom hint line
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:EnableMouse(true)
@@ -928,6 +939,7 @@ local function BuildConfirm()
         b.icon:SetAllPoints(); b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         b.cap = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         b.cap:SetPoint("BOTTOM", b, "TOP", 0, 3); b.cap:SetText(cap)
+        b.capBase = cap                     -- the paging counter is appended to this
         b.name = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         b.name:SetPoint("TOP", b, "BOTTOM", 0, -3); b.name:SetWidth(104); b.name:SetJustifyH("CENTER"); b.name:SetHeight(24)
         b.price = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -940,6 +952,29 @@ local function BuildConfirm()
         b.tag = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         b.tag:SetPoint("TOP", b.ah, "BOTTOM", 0, -1)
         return b
+    end
+
+    -- Paging arrows, one pair per candidate slot: left of the icon steps back
+    -- towards the cheapest, right steps up towards the dearest. No wrap-around -
+    -- wrapping from the most expensive straight back to the cheapest is exactly
+    -- the misclick that cannot be undone. The end of a list greys its arrow out.
+    local function Pager(b, which)
+        local function Arrow(dir, texture, myPoint, itsPoint, xOff)
+            local a = CreateFrame("Button", nil, f)
+            a:SetSize(22, 22)
+            a:SetPoint(myPoint, b, itsPoint, xOff, 0)
+            a:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. texture .. "Page-Up")
+            a:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. texture .. "Page-Down")
+            a:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. texture .. "Page-Disabled")
+            a:SetScript("OnClick", function() f.Step(which, dir) end)
+            return a
+        end
+        b.prev = Arrow(-1, "Prev", "RIGHT", "LEFT",  -4)
+        b.next = Arrow( 1, "Next", "LEFT",  "RIGHT",  4)
+        -- Same movement on the wheel: faster once you know it is there, and the
+        -- arrows stay as the discoverable version of it.
+        b:EnableMouseWheel(true)
+        b:SetScript("OnMouseWheel", function(_, delta) f.Step(which, delta > 0 and -1 or 1) end)
     end
 
     local function hover(anchor) return function(self)
@@ -955,6 +990,8 @@ local function BuildConfirm()
 
     f.junkBtn  = Slot("|cffcfcfcfJunk|r", 220)
     f.otherBtn = Slot("|cffffcc55Non-junk|r", 320)
+    Pager(f.junkBtn,  "junk")
+    Pager(f.otherBtn, "other")
     for _, b in ipairs({ f.junkBtn, f.otherBtn }) do
         b:SetScript("OnEnter", hover("ANCHOR_RIGHT"))
         b:SetScript("OnLeave", GameTooltip_Hide)
@@ -963,13 +1000,147 @@ local function BuildConfirm()
                 print(GOLD .. "DGs Junk|r preview mode - nothing was deleted.")
                 return                                   -- dialog stays open so you can keep poking at it
             end
-            if self.rec then f:Hide(); DoLootClear(self.rec, f.slot) end
+            if not self.rec then return end
+            -- The record names a bag slot, and bags can shuffle while the dialog
+            -- sits open (another delete, a stack merging, an addon moving things).
+            -- Deleting by stale coordinates would destroy whatever landed there
+            -- instead, so re-check the slot still holds what was picked.
+            if GetContainerItemID(self.rec.bag, self.rec.slot) ~= self.rec.id then
+                dbg("clear aborted: bag " .. tostring(self.rec.bag) .. " slot " ..
+                    tostring(self.rec.slot) .. " no longer holds item " .. tostring(self.rec.id))
+                print(GOLD .. "DGs Junk|r your bags changed - nothing deleted, pick again.")
+                if f.SyncLists then f.SyncLists() end
+                return
+            end
+            f:Hide(); DoLootClear(self.rec, f.slot)
         end)
     end
 
     local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     cancel:SetSize(120, 24); cancel:SetPoint("BOTTOM", 0, 12); cancel:SetText(CANCEL or "Cancel")
     cancel:SetScript("OnClick", function() f:Hide() end)
+
+    -- Paging state and rendering live on the frame, so the arrows, the wheel and
+    -- a bag update can all re-render without going back through ShowLootConfirm.
+    local function listFor(which) return ((which == "junk") and f.junkList or f.otherList) or {} end
+    local function idxFor(which)  return ((which == "junk") and f.junkIdx  or f.otherIdx) or 1 end
+
+    -- Both slots are ALWAYS drawn. An empty one showing nothing at all reads as a
+    -- broken dialog, so it says why it is empty. `empty` is the wording.
+    local function fill(b, rec, empty)
+        b:Show()
+        if not rec then
+            b.rec, b.itemID, b.link = nil, nil, nil     -- no tooltip, and OnClick finds no record
+            b.icon:SetTexture(nil)          -- nothing painted inside: the frame shows through
+            -- The reason goes on the NAME line, where an item's name would be. On
+            -- the price line it reads as if the item cost "no junk".
+            b.name:SetText(GREY .. empty .. "|r")
+            b.price:SetText("")
+            b.ah:SetText("")
+            b.tag:SetText("")
+            b.SetBorder(0.3, 0.3, 0.3)      -- same neutral border as a filled slot
+            return
+        end
+        local n, _, _, _, _, _, _, _, _, tex = GetItemInfo(rec.id)
+        b.rec = rec; b.itemID = rec.id; b.link = nil
+        b.icon:SetTexture(tex)
+        b.name:SetText(n or ("item " .. rec.id))
+        -- Total first, stack size after it ("3c (x3)"): the recommendation compares
+        -- total stack value, so the total has to be the number you actually see.
+        -- Both rows are stack totals, so vendor and AH are directly comparable.
+        -- The count is shown even at x1. Hiding it there made the line jump
+        -- between "5c" and "36c (x9)" as you paged, and you could not tell at a
+        -- glance whether a price was for one item or for a stack.
+        local cnt = rec.count or 1
+        b.price:SetText("|cffffffff" .. Coin((rec.each or 0) * cnt) .. "|r" ..
+            " " .. GREY .. "(x" .. cnt .. ")|r")
+        local ahEach = AHPrice(rec.id)
+        b.ah:SetText((ahEach and ahEach > 0) and (GREY .. "AH:|r " .. Coin(ahEach * cnt)) or "")
+        b.tag:SetText("")
+        b.SetBorder(0.3, 0.3, 0.3)
+    end
+
+    -- Arrows are hidden outright when there is nothing to page through, and
+    -- disabled (greyed by the template's disabled texture) at each end.
+    local function pager(b, which)
+        local n, i = #listFor(which), idxFor(which)
+        b.prev:SetShown(n > 1); b.next:SetShown(n > 1)
+        b.prev:SetEnabled(i > 1)
+        b.next:SetEnabled(i < n)
+        b.cap:SetText(b.capBase .. ((n > 1) and (" " .. GREY .. i .. "/" .. n .. "|r") or ""))
+    end
+
+    f.RenderCandidates = function()
+        local jl, ol = listFor("junk"), listFor("other")
+        fill(f.junkBtn,  jl[idxFor("junk")],  "no junk")
+        fill(f.otherBtn, ol[idxFor("other")], "no other item")
+        pager(f.junkBtn, "junk"); pager(f.otherBtn, "other")
+        -- the paging hint is noise when there is nothing to page through
+        if not f.preview then
+            f.banner:SetText((#jl > 1 or #ol > 1)
+                and (GREY .. "Arrows or mouse wheel over an icon: pick a different item|r") or "")
+        end
+
+        -- The recommendation still means "the cheapest thing you could destroy",
+        -- so it is anchored to the head of each list, never to whatever you have
+        -- paged to. Page away from it and the tag simply goes - you made a
+        -- deliberate choice, the dialog should not keep calling it recommended.
+        local rj = jl[1] and jl[1].value or math.huge
+        local ro = ol[1] and ol[1].value or math.huge
+        local best = (rj <= ro) and f.junkBtn or f.otherBtn
+        for _, b in ipairs({ f.junkBtn, f.otherBtn }) do
+            local rec = b.rec
+            if rec then
+                if f.lworth and rec.value >= f.lworth then
+                    -- paged up past the point where the trade pays off
+                    b.SetBorder(0.85, 0.15, 0.15)
+                    b.tag:SetText(RED .. "costs more than the loot|r")
+                elseif b == best and rec == ((b == f.junkBtn) and jl[1] or ol[1]) then
+                    b.SetBorder(0.1, 0.85, 0.2)
+                    b.tag:SetText(GREEN .. "recommended|r")
+                end
+            end
+        end
+
+        -- Verdict on the loot item: same rule as the loot tooltip, so the two can
+        -- never disagree - the looted item's worth against the TOTAL value of the
+        -- CHEAPEST stack you would have to destroy. Paging does not move it, or
+        -- the dialog and the tooltip would start contradicting each other.
+        local lo = math.min(rj, ro)
+        if f.lid and IsQuestItem(f.lid) then
+            f.lootBtn.SetBorder(0.1, 0.85, 0.2)
+            f.lootBtn.tag:SetText(GREEN .. "quest - take it|r")
+        elseif f.lworth and lo < math.huge then
+            if f.lworth > lo then
+                f.lootBtn.SetBorder(0.1, 0.85, 0.2)
+                f.lootBtn.tag:SetText(GREEN .. "worth it|r")
+            else
+                f.lootBtn.SetBorder(0.85, 0.15, 0.15)
+                f.lootBtn.tag:SetText(RED .. "not worth it|r")
+            end
+        else
+            f.lootBtn.SetBorder(0.3, 0.3, 0.3)
+            f.lootBtn.tag:SetText("")
+        end
+    end
+
+    f.Step = function(which, dir)
+        local i = idxFor(which) + dir
+        if i < 1 or i > #listFor(which) then return end      -- hard stops, no wrap-around
+        if which == "junk" then f.junkIdx = i else f.otherIdx = i end
+        f.RenderCandidates()
+    end
+
+    -- Bags changed under an open dialog: rebuild both lists so the records cannot
+    -- go stale, keeping your position where it still exists.
+    f.SyncLists = function()
+        if f.preview then return end                          -- a preview is a deliberate snapshot
+        local _, _, jl, ol = LootClearCandidates()
+        f.junkList, f.otherList = jl or {}, ol or {}
+        f.junkIdx  = math.max(1, math.min(f.junkIdx  or 1, #f.junkList))
+        f.otherIdx = math.max(1, math.min(f.otherIdx or 1, #f.otherList))
+        f.RenderCandidates()
+    end
 
     -- Disarming on OnHide (rather than at the end of the preview call) means the
     -- flag is tied to the dialog's lifetime: Escape, the X, Cancel and
@@ -988,20 +1159,22 @@ end
 -- `preview` is the ONLY thing a preview passes differently: everything below
 -- (prices, ranking, recommendation, verdict) runs exactly as it does in a real
 -- full-bags situation, so the preview keeps testing the live implementation.
-local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview)
+local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkList, otherList)
     local f = confirmFrame or BuildConfirm()
     f.slot = slot
     f.preview = preview and true or false
     previewMode = f.preview
-    f:SetHeight(f.preview and 250 or 224)
+    -- One height for both modes: the bottom line now carries either the preview
+    -- warning or the paging hint, so the frame no longer changes size.
+    f:SetHeight(250)
     if f.preview then
         f.head:SetText(GOLD .. "DEBUG PREVIEW|r - real items, real ranking:")
         f.banner:SetText(RED .. "Preview Mode: All actions are only for testing, nothing will be deleted or ignored.|r")
-        f.banner:Show()
     else
         f.head:SetText("Bags full - click a junk/item to delete and loot:")
-        f.banner:Hide()
+        f.banner:SetText(GREY .. "Arrows or mouse wheel over an icon: pick a different item|r")
     end
+    f.banner:Show()
 
     local lname, _, _, _, _, _, _, _, _, ltex = GetItemInfo(lootLink)
     f.lootBtn.link = lootLink; f.lootBtn.itemID = nil
@@ -1026,71 +1199,13 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview)
     local lah = lid and AHPrice(lid)
     f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. "AH:|r " .. Coin(lah)) or "")
 
-    -- Both slots are ALWAYS drawn. An empty one keeps the dialog's shape stable
-    -- and says why it is empty ("no junk") instead of silently vanishing, which
-    -- reads as a broken dialog. `empty` is the wording for that slot.
-    local function fill(b, rec, empty)
-        b:Show()
-        if not rec then
-            b.rec, b.itemID, b.link = nil, nil, nil     -- no tooltip, and OnClick finds no record
-            b.icon:SetTexture(nil)          -- nothing painted inside: the frame shows through
-            -- The reason goes on the NAME line, where an item's name would be. On
-            -- the price line it reads as if the item cost "no junk".
-            b.name:SetText(GREY .. empty .. "|r")
-            b.price:SetText("")
-            b.ah:SetText("")
-            b.tag:SetText("")
-            b.SetBorder(0.3, 0.3, 0.3)      -- same neutral border as a filled slot
-            return
-        end
-        local n, _, _, _, _, _, _, _, _, tex = GetItemInfo(rec.id)
-        b.rec = rec; b.itemID = rec.id; b.link = nil
-        b.icon:SetTexture(tex)
-        b.name:SetText(n or ("item " .. rec.id))
-        -- Total first, stack size after it ("3c (x3)"): the recommendation compares
-        -- total stack value, so the total has to be the number you actually see.
-        -- Both rows are stack totals, so vendor and AH are directly comparable.
-        local cnt = rec.count or 1
-        local stack = (cnt > 1) and (" " .. GREY .. "(x" .. cnt .. ")|r") or ""
-        b.price:SetText("|cffffffff" .. Coin((rec.each or 0) * cnt) .. "|r" .. stack)
-        local ahEach = AHPrice(rec.id)
-        b.ah:SetText((ahEach and ahEach > 0) and (GREY .. "AH:|r " .. Coin(ahEach * cnt)) or "")
-        b.tag:SetText("")
-        b.SetBorder(0.3, 0.3, 0.3)
-    end
-    fill(f.junkBtn, junkRec, "no junk")
-    fill(f.otherBtn, otherRec, "no other item")
-
-    -- recommend (green border + tag) the cheaper of the two
-    local rj = junkRec and junkRec.value or math.huge
-    local ro = otherRec and otherRec.value or math.huge
-    local best = (rj <= ro) and f.junkBtn or f.otherBtn
-    -- Both slots are always shown now, so visibility is no longer proof that the
-    -- slot holds anything - the recommendation has to key off the record itself.
-    if best.rec then
-        best.SetBorder(0.1, 0.85, 0.2)
-        best.tag:SetText(GREEN .. "recommended|r")
-    end
-
-    -- Verdict on the loot item itself: same rule as the loot tooltip, so the two can
-    -- never disagree - worth of the looted item vs the TOTAL value of the cheapest
-    -- stack you would have to destroy. Green border = trade up, red = don't bother.
-    local lo = math.min(rj, ro)
-    if lid and IsQuestItem(lid) then
-        f.lootBtn.SetBorder(0.1, 0.85, 0.2)
-        f.lootBtn.tag:SetText(GREEN .. "quest - take it|r")
-    elseif lworth and lo < math.huge then
-        if lworth > lo then
-            f.lootBtn.SetBorder(0.1, 0.85, 0.2)
-            f.lootBtn.tag:SetText(GREEN .. "worth it|r")
-        else
-            f.lootBtn.SetBorder(0.85, 0.15, 0.15)
-            f.lootBtn.tag:SetText(RED .. "not worth it|r")
-        end
-    else
-        f.lootBtn.SetBorder(0.3, 0.3, 0.3)
-        f.lootBtn.tag:SetText("")
-    end
+    -- Callers that have the ranked lists pass them; the single records stay the
+    -- fallback, so a one-item list behaves exactly as before (arrows hidden).
+    f.lid, f.lworth = lid, lworth
+    f.junkList  = junkList  or (junkRec  and { junkRec })  or {}
+    f.otherList = otherList or (otherRec and { otherRec }) or {}
+    f.junkIdx, f.otherIdx = 1, 1        -- every dialog opens on the cheapest
+    f.RenderCandidates()
     f:Show()
 end
 
@@ -1121,7 +1236,7 @@ end
 
 local function PreviewLootConfirm()
     -- the real candidate scan first - that is what we actually want to look at
-    local junkRec, otherRec = LootClearCandidates()
+    local junkRec, otherRec, junkList, otherList = LootClearCandidates()
     local all = PreviewRecords()
     if #all == 0 then
         print(GOLD .. "DGs Junk|r preview: no usable items in your bags.")
@@ -1160,7 +1275,7 @@ local function PreviewLootConfirm()
     local link = select(2, GetItemInfo(pick.id))
     dbg("preview: loot=" .. tostring(pick.id), "junk=" .. (junkRec and junkRec.id or "-"),
         "other=" .. (otherRec and otherRec.id or "-"))
-    ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true)
+    ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true, junkList, otherList)
 end
 
 -- Is a PREVIEW dialog currently up? A real full-bags dialog does not count - the
@@ -1192,12 +1307,12 @@ local function LootAssistClick(self)
         dbg("loot-assist: item stacks into existing stack, no clear needed")
         return
     end
-    local junkRec, otherRec = LootClearCandidates()
+    local junkRec, otherRec, junkList, otherList = LootClearCandidates()
     if not junkRec and not otherRec then dbg("loot-assist: bags full, nothing deletable to clear"); return end
     local lootLink = (GetLootSlotLink and GetLootSlotLink(slot)) or "this item"
     dbg("loot-assist: junk=" .. (junkRec and junkRec.id or "-"), "other=" .. (otherRec and otherRec.id or "-"), "slot", slot)
     -- the pick-an-item dialog IS the confirm (choose which to delete, or Cancel)
-    ShowLootConfirm(lootLink, junkRec, otherRec, slot)
+    ShowLootConfirm(lootLink, junkRec, otherRec, slot, nil, junkList, otherList)
 end
 local function HookLootButtons()
     local n = (GetNumLootItems and GetNumLootItems()) or 0
@@ -1433,6 +1548,9 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     end
     if event == "BAG_UPDATE_DELAYED" and LootFrame and LootFrame:IsShown() then
         ColorLootRowsSoon()           -- bags just filled up / freed up: re-judge
+    end
+    if event == "BAG_UPDATE_DELAYED" and confirmFrame and confirmFrame:IsShown() then
+        if confirmFrame.SyncLists then confirmFrame.SyncLists() end   -- keep candidates off stale bag slots
     end
     if event == "PLAYER_LOGIN" then
         BindProfile()                 -- now that the character name is known
