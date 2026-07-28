@@ -842,11 +842,35 @@ LootClearCandidates = function()
     end
     -- Cheapest first, and only the cheapest MAX_CANDIDATES are offered: past that
     -- you are picking through things you actually want to keep.
-    local function byValue(a, b) return a.value < b.value end
-    table.sort(junkList, byValue)
-    table.sort(otherList, byValue)
-    while #junkList  > MAX_CANDIDATES do table.remove(junkList)  end
-    while #otherList > MAX_CANDIDATES do table.remove(otherList) end
+    -- table.sort is not stable, so equal records (three clams, all count 1) would
+    -- survive in an arbitrary order and the dialog would pick a different one
+    -- each time it opened. Bag/slot makes the choice reproducible.
+    local function byValue(a, b)
+        if a.value ~= b.value then return a.value < b.value end
+        if (a.count or 1) ~= (b.count or 1) then return (a.count or 1) < (b.count or 1) end
+        if a.bag ~= b.bag then return a.bag < b.bag end
+        return a.slot < b.slot
+    end
+    -- One entry per ITEM, not per bag slot. Several slots holding the same thing
+    -- are the same decision - each frees exactly one slot - and every one after
+    -- the cheapest is a strictly worse version of a choice you already made, so
+    -- they would only waste pages. Sorting first means the survivor is the
+    -- cheapest slot holding that item: of an 18/19/20 stack of cloth you are
+    -- offered the 18, and the other two are untouched. Deleting still only ever
+    -- takes the one slot on show.
+    local function byItem(list)
+        table.sort(list, byValue)
+        local out, seen = {}, {}
+        for _, rec in ipairs(list) do
+            if not seen[rec.id] then
+                seen[rec.id] = true
+                out[#out + 1] = rec
+                if #out >= MAX_CANDIDATES then break end   -- ten distinct items, not ten records
+            end
+        end
+        return out
+    end
+    junkList, otherList = byItem(junkList), byItem(otherList)
     return junkList[1], otherList[1], junkList, otherList
 end
 
