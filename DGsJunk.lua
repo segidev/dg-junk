@@ -746,16 +746,29 @@ local function TipItemID(tip, data)
     if tip.GetItem then local _, link = tip:GetItem(); return linkID(link) end  -- legacy
 end
 
--- How many of the item this loot tooltip is describing. A loot slot can hold a
--- stack, and the whole stack is what the bag slot buys you.
-local function LootTipQuantity(tip)
+-- Which loot slot a tooltip is describing, so its quantity and eligibility can be
+-- read back off the slot itself.
+local function LootTipSlot(tip)
     local info = tip and (tip.info or tip.processingInfo)
     local slot = info and info.getterName == "GetLootItem" and info.getterArgs and info.getterArgs[1]
     if not slot then
         local owner = tip and tip.GetOwner and tip:GetOwner()
         slot = owner and ((owner.slot) or (owner.GetID and owner:GetID()))
     end
+    return slot
+end
+
+-- A loot slot can hold a stack, and the whole stack is what the bag slot buys you.
+local function LootSlotQuantity(slot)
     return (slot and GetLootSlotInfo and select(3, GetLootSlotInfo(slot))) or 1
+end
+
+-- Group loot: while a green or better is being rolled for, the slot is locked for
+-- everyone, and it stays locked for you if you lose the roll. There is nothing to
+-- decide about an item you cannot take, so every verdict has to sit this out.
+local function LootSlotLocked(slot)
+    if not (slot and GetLootSlotInfo) then return false end
+    return select(6, GetLootSlotInfo(slot)) and true or false
 end
 
 local function AddVerdict(tip, id)
@@ -765,10 +778,18 @@ local function AddVerdict(tip, id)
     -- Stack total, not unit price: the candidates are ranked on stack totals, so
     -- the looted item has to be measured the same way or the comparison is unfair
     -- to the loot.
-    local qty = LootTipQuantity(tip)
+    local tipSlot = LootTipSlot(tip)
+    local qty = LootSlotQuantity(tipSlot)
     local hoverWorth = select(1, Worth(id, qty))
     if not hoverWorth then dbg("no value for id", id, "(info not cached)"); return end
     if not IsLootTooltip(tip) then return end          -- verdict only in the loot window, not bags
+    -- Being rolled for, or lost: a keep/trash verdict would be advice about a
+    -- decision that is not yours to make.
+    if LootSlotLocked(tipSlot) then
+        dbg("loot slot", tipSlot, "locked - roll in progress or not eligible")
+        tip:AddLine(GREY .. "Being rolled for - not yours to take yet|r")
+        return tip:Show()
+    end
     if IsQuestItem(id) then                            -- always worth taking, never compared on value
         dbg("quest item", id, "- take it")
         tip:AddLine(GREEN .. "Quest item: Take it!|r")
@@ -1486,6 +1507,15 @@ local function LootAssistClick(self)
     local slot = self.slot or (self.GetID and self:GetID())
     if not slot then return end
     if not (LootSlotHasItem and LootSlotHasItem(slot)) then return end
+    -- Group loot: a green or better under a roll is locked until the roll ends,
+    -- and stays locked if you lose. Offering to destroy something of yours to make
+    -- room for an item you may never receive is the worst advice this addon could
+    -- give, so say why and stop.
+    if LootSlotLocked(slot) then
+        dbg("loot-assist: slot", slot, "locked - roll in progress or not eligible, no dialog")
+        print(GOLD .. "DGs Junk|r that item is still being rolled for - nothing to clear yet.")
+        return
+    end
     -- Logged from here on: every earlier return is "not our business at all"
     -- (no shift, no slot, empty slot), but from here the addon made a judgement
     -- and the log should say which one, including the times it did nothing.
@@ -1579,7 +1609,10 @@ local function ColorLootRows()
             if DB and DB.lootColor ~= false and lo < math.huge and btn:IsShown() and slot
                and LootSlotHasItem and LootSlotHasItem(slot) then
                 local id = GetLootSlotLink and linkID(GetLootSlotLink(slot))
-                local qty = (GetLootSlotInfo and select(3, GetLootSlotInfo(slot))) or 1
+                local qty = LootSlotQuantity(slot)
+                if LootSlotLocked(slot) then
+                    id = nil        -- under a roll: no verdict, the choice is not yours
+                end
                 if id and StackRoom(id) >= qty then
                     -- stacks onto what you already carry: costs no slot, no verdict
                     id = nil
