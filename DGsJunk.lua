@@ -172,6 +172,19 @@ local function Coin(c)
     return out .. "|cffeda55f" .. cp .. "c|r"
 end
 
+-- Compact one-line description of a candidate record, so a log entry says which
+-- physical bag slot was involved and what it was judged to be worth. Values are
+-- raw copper on purpose: colour-coded coin strings are unreadable in a log and
+-- cannot be compared by eye.
+local function RecTag(rec)
+    if not rec then return "-" end
+    local name = (rec.id and select(1, GetItemInfo(rec.id))) or ("item " .. tostring(rec.id))
+    return string.format("%s(id=%s bag%s/%s x%s value=%sc each=%sc worth=%sc%s)",
+        name, tostring(rec.id), tostring(rec.bag), tostring(rec.slot), tostring(rec.count or 1),
+        tostring(rec.value or 0), tostring(rec.each or 0), tostring(rec.worthEach or 0),
+        rec.junk and " junk" or "")
+end
+
 -- Every user action funnels through act() so the Log tab shows what was done,
 -- to which item, and what the stored state became.
 local function act(what, id, detail)
@@ -815,6 +828,7 @@ end
 -- Returns the cheapest of each (what the tooltip verdict and the row tinting
 -- use, unchanged) plus the full ranked lists the dialog cycles through.
 local MAX_CANDIDATES = 10       -- deep enough to find an alternative, short enough to page through
+local lastCandidateSummary      -- log the scan result only when it actually changes
 LootClearCandidates = function()
     local junkList, otherList = {}, {}
     for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
@@ -870,7 +884,20 @@ LootClearCandidates = function()
         end
         return out
     end
+    local rawJunk, rawOther = #junkList, #otherList
     junkList, otherList = byItem(junkList), byItem(otherList)
+    -- This runs on every loot tooltip and every row tint, so logging it every
+    -- time would flood the 400-line buffer and push out what you were actually
+    -- looking for. Log it only when the outcome changes.
+    local summary = string.format("junk %d slots -> %d items, other %d slots -> %d items%s | cheapest junk=%s | cheapest other=%s",
+        rawJunk, #junkList, rawOther, #otherList,
+        ((rawJunk > MAX_CANDIDATES or rawOther > MAX_CANDIDATES) and (" (capped at " .. MAX_CANDIDATES .. ")") or ""),
+        RecTag(junkList[1]), RecTag(otherList[1]))
+    if summary ~= lastCandidateSummary then
+        lastCandidateSummary = summary
+        dbg("candidates:", summary,
+            "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
+    end
     return junkList[1], otherList[1], junkList, otherList
 end
 
@@ -1146,23 +1173,47 @@ local function BuildConfirm()
             f.lootBtn.SetBorder(0.3, 0.3, 0.3)
             f.lootBtn.tag:SetText("")
         end
+
+        -- What the player is actually looking at right now: both shown slots,
+        -- their position in the list, and the verdict each one was given. This is
+        -- the line that explains a screenshot after the fact.
+        dbg("dialog render:",
+            (f.preview and "[preview]" or "[live]"),
+            "junk", idxFor("junk") .. "/" .. #jl, "=", RecTag(f.junkBtn.rec),
+            "| other", idxFor("other") .. "/" .. #ol, "=", RecTag(f.otherBtn.rec),
+            "| loot worth=" .. tostring(f.lworth or 0) .. "c",
+            "cheapest=" .. (lo < math.huge and (lo .. "c") or "none"),
+            "| verdict=" .. (f.lootBtn.tag:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""),
+            "| recommend=" .. ((best == f.junkBtn) and "junk" or "other"))
     end
 
     f.Step = function(which, dir)
-        local i = idxFor(which) + dir
-        if i < 1 or i > #listFor(which) then return end      -- hard stops, no wrap-around
+        local from = idxFor(which)
+        local i, n = from + dir, #listFor(which)
+        if i < 1 or i > n then
+            dbg("page:", which, "blocked at", from .. "/" .. n, "(dir " .. dir .. ")")
+            return                                           -- hard stops, no wrap-around
+        end
         if which == "junk" then f.junkIdx = i else f.otherIdx = i end
+        dbg("page:", which, from .. " ->", i .. "/" .. n)
         f.RenderCandidates()
     end
 
     -- Bags changed under an open dialog: rebuild both lists so the records cannot
     -- go stale, keeping your position where it still exists.
     f.SyncLists = function()
-        if f.preview then return end                          -- a preview is a deliberate snapshot
+        if f.preview then dbg("resync: skipped, preview is a snapshot"); return end
+        local beforeJ, beforeO = f.junkIdx or 1, f.otherIdx or 1
         local _, _, jl, ol = LootClearCandidates()
         f.junkList, f.otherList = jl or {}, ol or {}
         f.junkIdx  = math.max(1, math.min(f.junkIdx  or 1, #f.junkList))
         f.otherIdx = math.max(1, math.min(f.otherIdx or 1, #f.otherList))
+        if f.junkIdx ~= beforeJ or f.otherIdx ~= beforeO then
+            dbg("resync: position clamped, junk", beforeJ .. "->" .. f.junkIdx,
+                "other", beforeO .. "->" .. f.otherIdx)
+        else
+            dbg("resync: lists rebuilt, position kept (junk " .. f.junkIdx .. ", other " .. f.otherIdx .. ")")
+        end
         f.RenderCandidates()
     end
 
@@ -1170,6 +1221,7 @@ local function BuildConfirm()
     -- flag is tied to the dialog's lifetime: Escape, the X, Cancel and
     -- CloseLootConfirm all clear it.
     f:SetScript("OnHide", function(self)
+        dbg("dialog closed", self.preview and "(preview)" or "(live)")
         self.preview = nil
         previewMode = false
         if PreviewBtnSync then PreviewBtnSync() end   -- closing it flips the Debug tab button back
@@ -1229,6 +1281,13 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
     f.junkList  = junkList  or (junkRec  and { junkRec })  or {}
     f.otherList = otherList or (otherRec and { otherRec }) or {}
     f.junkIdx, f.otherIdx = 1, 1        -- every dialog opens on the cheapest
+    dbg("dialog open:", f.preview and "[preview]" or "[live]",
+        "loot=" .. tostring(lname or lootLink), "id=" .. tostring(lid),
+        "worth=" .. tostring(lworth or 0) .. "c vendor=" .. tostring(lvendor or 0) .. "c",
+        "ah=" .. tostring(lah or 0) .. "c",
+        "| lists junk=" .. #f.junkList, "other=" .. #f.otherList,
+        "| lootSlot=" .. tostring(slot),
+        "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
     f.RenderCandidates()
     f:Show()
 end
@@ -1289,16 +1348,18 @@ local function PreviewLootConfirm()
             if (r.worthEach or 0) > lo then better[#better + 1] = r end
         end
     end
-    local pool = better
+    local pool, why = better, "worth more than both candidates"
     if #pool == 0 then
         pool = (#rest > 0) and rest or all
-        dbg("preview: nothing in bags beats the candidates, showing a plain item")
+        why = "nothing in bags beats the candidates - plain item, expect a red verdict"
     end
     local pick = pool[math.random(#pool)]
 
     local link = select(2, GetItemInfo(pick.id))
-    dbg("preview: loot=" .. tostring(pick.id), "junk=" .. (junkRec and junkRec.id or "-"),
-        "other=" .. (otherRec and otherRec.id or "-"))
+    dbg("preview: scanned", #all, "bag items, pool", #pool, "(" .. why .. ")",
+        "| picked", RecTag(pick),
+        "| junk=" .. RecTag(junkRec), "| other=" .. RecTag(otherRec),
+        "| lists junk=" .. #(junkList or {}), "other=" .. #(otherList or {}))
     ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true, junkList, otherList)
 end
 
@@ -1310,8 +1371,10 @@ end
 
 local function PreviewToggle()
     if PreviewShown() then
+        dbg("preview: toggled off")
         confirmFrame:Hide()          -- OnHide disarms the flag and syncs the button
     else
+        dbg("preview: toggled on")
         PreviewLootConfirm()
         if PreviewBtnSync then PreviewBtnSync() end
     end
@@ -1324,17 +1387,23 @@ local function LootAssistClick(self)
     local slot = self.slot or (self.GetID and self:GetID())
     if not slot then return end
     if not (LootSlotHasItem and LootSlotHasItem(slot)) then return end
-    if not BagsFull() then return end
+    -- Logged from here on: every earlier return is "not our business at all"
+    -- (no shift, no slot, empty slot), but from here the addon made a judgement
+    -- and the log should say which one, including the times it did nothing.
+    if not BagsFull() then dbg("loot-assist: slot", slot, "- bags not full, no dialog"); return end
     -- stacks into a partial stack you already carry -> no slot needed, no dialog
     local lid = GetLootSlotLink and linkID(GetLootSlotLink(slot))
-    if lid and StackRoom(lid) >= ((GetLootSlotInfo and select(3, GetLootSlotInfo(slot))) or 1) then
-        dbg("loot-assist: item stacks into existing stack, no clear needed")
+    local need = (GetLootSlotInfo and select(3, GetLootSlotInfo(slot))) or 1
+    if lid and StackRoom(lid) >= need then
+        dbg("loot-assist: item", lid, "stacks into existing stack (room",
+            StackRoom(lid), ">= needed", need .. ") - no clear needed")
         return
     end
     local junkRec, otherRec, junkList, otherList = LootClearCandidates()
     if not junkRec and not otherRec then dbg("loot-assist: bags full, nothing deletable to clear"); return end
     local lootLink = (GetLootSlotLink and GetLootSlotLink(slot)) or "this item"
-    dbg("loot-assist: junk=" .. (junkRec and junkRec.id or "-"), "other=" .. (otherRec and otherRec.id or "-"), "slot", slot)
+    dbg("loot-assist: slot", slot, "item", tostring(lid),
+        "| junk=" .. RecTag(junkRec), "| other=" .. RecTag(otherRec))
     -- the pick-an-item dialog IS the confirm (choose which to delete, or Cancel)
     ShowLootConfirm(lootLink, junkRec, otherRec, slot, nil, junkList, otherList)
 end
