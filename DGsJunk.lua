@@ -1220,10 +1220,8 @@ local function BuildConfirm()
         fill(f.otherBtn, ol[idxFor("other")], "no other item")
         pager(f.junkBtn, "junk"); pager(f.otherBtn, "other")
         -- the paging hint is noise when there is nothing to page through
-        if not f.preview then
-            f.banner:SetText((#jl > 1 or #ol > 1)
-                and (GREY .. "Arrows or mouse wheel over an icon: pick a different item|r") or "")
-        end
+        f.banner:SetText((#jl > 1 or #ol > 1)
+            and (GREY .. "Arrows or mouse wheel over an icon: pick a different item|r") or "")
 
         -- The recommendation still means "the cheapest thing you could destroy",
         -- so it is anchored to the head of each list, never to whatever you have
@@ -1335,16 +1333,15 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
     f.slot = slot
     f.preview = preview and true or false
     previewMode = f.preview
-    -- One height for both modes: the bottom line now carries either the preview
-    -- warning or the paging hint, so the frame no longer changes size.
+    -- A preview is deliberately INDISTINGUISHABLE from the real dialog: same
+    -- header, same hint line, no banner announcing itself. It exists to be looked
+    -- at and photographed, and a warning stamped across it would be in every
+    -- screenshot. It is still inert - the acting paths are all guarded - and the
+    -- only place that says so is a chat line when you click something, which no
+    -- screenshot of the dialog will contain.
     f:SetHeight(250)
-    if f.preview then
-        f.head:SetText(GOLD .. "DEBUG PREVIEW|r - real items, real ranking:")
-        f.banner:SetText(RED .. "Preview Mode: All actions are only for testing, nothing will be deleted or ignored.|r")
-    else
-        f.head:SetText("Bags full - click a junk/item to delete and loot:")
-        f.banner:SetText(GREY .. "Arrows or mouse wheel over an icon: pick a different item|r")
-    end
+    f.head:SetText("Bags full - click a junk/item to delete and loot:")
+    f.banner:SetText(GREY .. "Arrows or mouse wheel over an icon: pick a different item|r")
     f.banner:Show()
 
     local lname, _, _, _, _, _, _, _, _, ltex = GetItemInfo(lootLink)
@@ -1785,6 +1782,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         DB.marks  = DB.profiles.Main.marks
         if DB.alwaysShow == nil then DB.alwaysShow = true end   -- default ON
         if DB.autoSell == nil then DB.autoSell = false end       -- vendor auto-sell of marked items (opt-in)
+        if DB.devMode == nil then DB.devMode = false end         -- Debug tab is hidden until /dgjunk dev
         DB.scale = DB.scale or 1
         if DB.minimap == nil then DB.minimap = true end          -- minimap button on by default
         if DB.showFrames == nil then DB.showFrames = true end    -- master frame visibility
@@ -2047,12 +2045,8 @@ BuildConfig = function()
     config.tabBtns = {}
     local order = { { "settings", "Settings" }, { "ignored", "Ignored" }, { "junk", "Junk" },
                     { "debug", "Debug" }, { "log", "Log" } }
-    -- Derive the tab width from the count so adding a tab never overflows the
-    -- 480px frame (8px margin each side, 4px gutters).
-    local tabW = math.floor((480 - 16 - (#order - 1) * 4) / #order)
-    for i, t in ipairs(order) do
-        local b = ConfigBtn(config, t[2], tabW, function() ShowTab(t[1]) end)
-        b:SetPoint("TOPLEFT", 8 + (i - 1) * (tabW + 4), -52)
+    for _, t in ipairs(order) do
+        local b = ConfigBtn(config, t[2], 90, function() ShowTab(t[1]) end)
         -- selection art, hidden until ShowTab marks this tab active
         b.sel = b:CreateTexture(nil, "OVERLAY")
         b.sel:SetAllPoints()
@@ -2065,6 +2059,27 @@ BuildConfig = function()
         b.selBar:SetColorTexture(1, 0.82, 0, 0.9)
         b.selBar:Hide()
         config.tabBtns[t[1]] = b
+    end
+
+    -- Tabs are laid out from the ones actually on show, so hiding Debug closes
+    -- the gap instead of leaving a hole, and the remaining tabs share the width.
+    config.LayoutTabs = function()
+        local visible = {}
+        for _, t in ipairs(order) do
+            local show = (t[1] ~= "debug") or (DB and DB.devMode)
+            config.tabBtns[t[1]]:SetShown(show)
+            if show then visible[#visible + 1] = t[1] end
+        end
+        local w = math.floor((480 - 16 - (#visible - 1) * 4) / #visible)
+        for i, name in ipairs(visible) do
+            local b = config.tabBtns[name]
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", 8 + (i - 1) * (w + 4), -52)
+        end
+        -- Leaving dev mode while sitting on the Debug tab would strand the window
+        -- on a hidden panel.
+        if not (DB and DB.devMode) and config.panels.debug:IsShown() then ShowTab("settings") end
     end
 
     --====================== IGNORED panel ======================--
@@ -2396,6 +2411,7 @@ BuildConfig = function()
     for _, cb in pairs(config.checks) do cb.Refresh() end
     config.scaleSlider.Refresh()
     ApplyLogVis()
+    config.LayoutTabs()
     ShowTab("settings")
 end
 
@@ -2409,6 +2425,7 @@ end
 RefreshConfig = function()
     if not config then return end
     if config.checks then for _, cb in pairs(config.checks) do cb.Refresh() end end
+    if config.LayoutTabs then config.LayoutTabs() end
     if PreviewBtnSync then PreviewBtnSync() end
     if config.scaleSlider then config.scaleSlider.Refresh() end
     if config.RefreshProfile then config.RefreshProfile() end
@@ -2516,7 +2533,23 @@ end
 SLASH_DGSJUNK1 = "/dgjunk"
 SlashCmdList.DGSJUNK = function(msg)
     local cmd = (msg or ""):lower():match("^%s*(%S*)")
+    -- Development mode: undocumented on purpose, no setting in the UI. It exists
+    -- for working ON the addon, so the only way in is typing it.
+    if cmd == "dev" then
+        DB.devMode = not DB.devMode
+        act("dev mode", nil, tostring(DB.devMode))
+        if not config then BuildConfig() end
+        config.LayoutTabs()
+        if not DB.devMode then CloseLootConfirm() end   -- a preview must not outlive dev mode
+        print(GOLD .. "DGs Junk|r development mode " ..
+            (DB.devMode and (GREEN .. "on|r - the Debug tab is available") or (RED .. "off|r")))
+        return
+    end
     if cmd == "preview" then
+        if not (DB and DB.devMode) then
+            print(GOLD .. "DGs Junk|r development mode is off (/dgjunk dev).")
+            return
+        end
         if not config then BuildConfig() end     -- the Debug tab owns the label sync
         PreviewToggle()
         return
