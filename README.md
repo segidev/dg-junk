@@ -41,8 +41,14 @@ auction-house value. Hover for the item tooltip and the available actions.
   more than your cheapest junk, red when it is not, so you can read the whole window at a glance
   without hovering anything.
 - **Full bags?** Clicking a loot item with no free slot opens a pick-an-item dialog: the loot on
-  the left, your cheapest junk and cheapest non-junk on the right with prices, the cheaper one
+  the left, your cheapest junk and cheapest non-junk on the right with both prices, the cheaper one
   recommended. Limited to Common quality and below, so the deletion is instant.
+  - Not the item you wanted to lose? Page through the next-cheapest ones with the arrows either
+    side of an icon, or the mouse wheel over it, up to ten per side. It opens on the cheapest and
+    stops at both ends, so nothing wraps round to something expensive.
+  - Each item appears once, not once per bag slot, and you are offered its smallest stack.
+  - **Right-click** an item to ignore it, **shift-right-click** to skip the menu. It drops out of
+    the list and the next candidate takes its place.
 - **Junk-coin overlay**. Items *you* marked get a small coin in the bag slot's corner. Works with
   Bagnon and the default bags, and is purely additive: it never overwrites rarity borders.
 - **Vendor auto-sell** (opt-in, off by default). Sells only items you marked yourself and only
@@ -83,8 +89,9 @@ Quest items are never suggested, never auto-sold and never deletable, even if ma
 ## Worth calculation
 
 Items are ranked by real worth: vendor price, or the Auctionator AH price when *Suggest by AH* is
-enabled and data exists. Ranking uses the stack's total value, while the loot comparison uses
-per-item worth, so a stack of cheap junk no longer outranks a genuinely valuable single item.
+enabled and data exists. Both sides of the comparison are measured as a **stack total**, because a
+bag slot holds a whole stack: destroying a slot costs you all of it, and looting one gains you all
+of it. A stack of 4 meat is judged as 4, against the full value of the stack you would discard.
 
 ## Slash commands
 

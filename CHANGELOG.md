@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1
+
+Improvements to the full-bags dialog, plus a way to look at it without filling your bags first.
+
+- The dialog can page through your other discardable items: arrows either side of each icon, or the
+  mouse wheel over one. It always opens on the cheapest and stops at both ends, so nothing wraps
+  around to an expensive item by accident. Up to ten choices per side.
+- Each item is offered once, not once per bag slot. Carrying three stacks of cloth now offers you
+  the smallest stack, and the other two are left alone.
+- Every icon shows both prices, vendor and auction house, whichever one the ranking is set to use.
+  The stack size is always shown, so it is clear whether a price covers one item or a whole stack.
+- Fixed: a looted stack is now judged as the whole stack, not as a single item. Looting 4 pieces of
+  meat is worth four times one, and it used to be compared as one against a full stack you would
+  have to destroy, so stacked loot could be called not worth taking when it clearly was. The loot
+  tooltip and the coloured loot rows use the same corrected comparison.
+- Right-click an item in the dialog to ignore it, or shift-right-click to ignore it straight away.
+  The item drops out of the list and the next one takes its place.
+- An empty side of the dialog now says why it is empty instead of vanishing.
+- The dialog keeps up with everything else: ignoring or marking an item anywhere else updates it
+  immediately, and the other way round.
+- Debug logging now records what the dialog decided and why.
+
 ## 1.0
 
 First public release. Built for WoW Classic Era / Hardcore, interface 11509 (patch 1.15.9).

@@ -4,7 +4,7 @@
 ## Author: Vokra
 ## IconTexture: Interface\Icons\INV_Misc_Bag_10
 ## Category: Bags & Inventory
-## Version: 1.0
+## Version: 1.1
 ## OptionalDeps: Auctionator
 ## SavedVariables: DGsJunkDB
 ## X-Curse-Project-ID: 1626276
