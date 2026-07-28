@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed: items being rolled for in a group no longer get a keep-or-discard verdict. While a green
+  or better is under a roll, nobody can take it yet, and it stays out of reach if you lose the
+  roll, so the addon no longer offers to clear a bag slot for it. Shift-clicking such an item says
+  it is still being rolled for instead of opening the dialog, the loot tooltip says the same, and
+  those rows are left untinted. Once you win the roll it behaves normally again.
+
 ## 1.1
 
 Improvements to the full-bags dialog, plus a way to look at it without filling your bags first.
