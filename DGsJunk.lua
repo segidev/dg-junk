@@ -946,6 +946,12 @@ local function BuildConfirm()
     local closeBtn = f.CloseButton or _G["DGsJunkConfirmCloseButton"]
     if closeBtn then closeBtn:SetScript("OnClick", function() f:Hide() end) end
 
+    -- Paging state lives on the frame, so the arrows, the wheel, a click and a bag
+    -- update all read the same thing. Declared up here because the button scripts
+    -- below close over it.
+    local function listFor(which) return ((which == "junk") and f.junkList or f.otherList) or {} end
+    local function idxFor(which)  return ((which == "junk") and f.junkIdx  or f.otherIdx) or 1 end
+
     local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("TOP", 0, -26)
     head:SetText("Bags full - click a junk/item to delete and loot:")
@@ -1028,10 +1034,60 @@ local function BuildConfirm()
         b:SetScript("OnMouseWheel", function(_, delta) f.Step(which, delta > 0 and -1 or 1) end)
     end
 
-    local function hover(anchor) return function(self)
-        if self.link then GameTooltip:SetOwner(self, anchor); GameTooltip:SetHyperlink(self.link); GameTooltip:Show()
-        elseif self.itemID then GameTooltip:SetOwner(self, anchor); GameTooltip:SetItemByID(self.itemID); GameTooltip:Show() end
+    local function hover(anchor, hints) return function(self)
+        if self.link then GameTooltip:SetOwner(self, anchor); GameTooltip:SetHyperlink(self.link)
+        elseif self.itemID then GameTooltip:SetOwner(self, anchor); GameTooltip:SetItemByID(self.itemID)
+        else return end
+        -- Same hint block as the two bag icons, so the interactions read the same
+        -- everywhere: what a click does is never a thing you have to discover.
+        if hints and self.rec then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cff33ff99Left-click|r|cff888888 delete this and loot|r")
+            GameTooltip:AddLine("|cffff8800Shift-right-click|r|cff888888 ignore|r")
+            GameTooltip:AddLine("|cffffcc55Right-click|r|cff888888 for menu|r")
+            if #listFor(self.which) > 1 then
+                GameTooltip:AddLine("|cff888888Arrows / mouse wheel:|r pick another item")
+            end
+        end
+        GameTooltip:Show()
     end end
+
+    -- Deliberately not OpenMenu(): in this dialog the only safe extra action is
+    -- Ignore. Delete already has the left-click, and offering it twice - once as
+    -- a click, once in a menu - is how an irreversible action gets hit by accident.
+    local function IgnoreMenu(rec, owner)
+        local link = select(2, GetItemInfo(rec.id)) or "this item"
+        local function doIgnore() f.IgnoreCandidate(rec) end
+        if MenuUtil and MenuUtil.CreateContextMenu then
+            MenuUtil.CreateContextMenu(owner or UIParent, function(_, root)
+                root:CreateTitle("DGs Junk")
+                root:CreateButton("Ignore " .. link, doIgnore)
+            end)
+        elseif EasyMenu then
+            legacyMenuFrame = legacyMenuFrame or CreateFrame("Frame", "DGsJunkConfirmMenu", UIParent, "UIDropDownMenuTemplate")
+            EasyMenu({ { text = "DGs Junk", isTitle = true, notCheckable = true },
+                       { text = "Ignore " .. link, notCheckable = true, func = doIgnore } },
+                     legacyMenuFrame, "cursor", 0, 0, "MENU")
+        else
+            doIgnore()          -- no menu API at all: do the only thing the menu offers
+        end
+    end
+
+    -- Ignoring rebuilds the lists, and LootClearCandidates() filters ignored items
+    -- out - so the item disappears and the slot shows the next candidate on its
+    -- own. Holding the index still is what makes it feel like "go to the next
+    -- one": same position, one fewer entry.
+    f.IgnoreCandidate = function(rec)
+        if not rec then return end
+        if f.preview then
+            print(GOLD .. "DGs Junk|r preview mode - nothing was ignored.")
+            dbg("preview: ignore suppressed for item " .. tostring(rec.id))
+            return
+        end
+        IgnoreRecord(rec)                                   -- logs via act() and prints
+        if f.SyncLists then f.SyncLists() end
+        Update()
+    end
 
     f.lootBtn = Slot("|cff33ff99Loot|r", 40)
     f.lootBtn:SetScript("OnEnter", hover("ANCHOR_LEFT"))
@@ -1041,17 +1097,33 @@ local function BuildConfirm()
 
     f.junkBtn  = Slot("|cffcfcfcfJunk|r", 220)
     f.otherBtn = Slot("|cffffcc55Non-junk|r", 320)
+    f.junkBtn.which, f.otherBtn.which = "junk", "other"
     Pager(f.junkBtn,  "junk")
     Pager(f.otherBtn, "other")
     for _, b in ipairs({ f.junkBtn, f.otherBtn }) do
-        b:SetScript("OnEnter", hover("ANCHOR_RIGHT"))
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:SetScript("OnEnter", hover("ANCHOR_RIGHT", true))
         b:SetScript("OnLeave", GameTooltip_Hide)
-        b:SetScript("OnClick", function(self)
+        b:SetScript("OnClick", function(self, button)
+            if button == "RightButton" then
+                if not self.rec then return end
+                if IsShiftKeyDown() then
+                    dbg("candidate shift-right-click:", self.which, RecTag(self.rec))
+                    f.IgnoreCandidate(self.rec)
+                else
+                    dbg("candidate right-click menu:", self.which, RecTag(self.rec))
+                    IgnoreMenu(self.rec, self)
+                end
+                return
+            end
             if f.preview then
                 print(GOLD .. "DGs Junk|r preview mode - nothing was deleted.")
+                dbg("preview: click on", self.which, "ignored -", RecTag(self.rec))
                 return                                   -- dialog stays open so you can keep poking at it
             end
             if not self.rec then return end
+            dbg("candidate chosen:", self.which, idxFor(self.which) .. "/" .. #listFor(self.which),
+                RecTag(self.rec))
             -- The record names a bag slot, and bags can shuffle while the dialog
             -- sits open (another delete, a stack merging, an addon moving things).
             -- Deleting by stale coordinates would destroy whatever landed there
@@ -1070,11 +1142,6 @@ local function BuildConfirm()
     local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     cancel:SetSize(120, 24); cancel:SetPoint("BOTTOM", 0, 12); cancel:SetText(CANCEL or "Cancel")
     cancel:SetScript("OnClick", function() f:Hide() end)
-
-    -- Paging state and rendering live on the frame, so the arrows, the wheel and
-    -- a bag update can all re-render without going back through ShowLootConfirm.
-    local function listFor(which) return ((which == "junk") and f.junkList or f.otherList) or {} end
-    local function idxFor(which)  return ((which == "junk") and f.junkIdx  or f.otherIdx) or 1 end
 
     -- Both slots are ALWAYS drawn. An empty one showing nothing at all reads as a
     -- broken dialog, so it says why it is empty. `empty` is the wording.
