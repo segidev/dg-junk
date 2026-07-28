@@ -746,11 +746,27 @@ local function TipItemID(tip, data)
     if tip.GetItem then local _, link = tip:GetItem(); return linkID(link) end  -- legacy
 end
 
+-- How many of the item this loot tooltip is describing. A loot slot can hold a
+-- stack, and the whole stack is what the bag slot buys you.
+local function LootTipQuantity(tip)
+    local info = tip and (tip.info or tip.processingInfo)
+    local slot = info and info.getterName == "GetLootItem" and info.getterArgs and info.getterArgs[1]
+    if not slot then
+        local owner = tip and tip.GetOwner and tip:GetOwner()
+        slot = owner and ((owner.slot) or (owner.GetID and owner:GetID()))
+    end
+    return (slot and GetLootSlotInfo and select(3, GetLootSlotInfo(slot))) or 1
+end
+
 local function AddVerdict(tip, id)
     if not id then dbg("no itemID from tooltip"); return end
     if tip.dgsjID == id then return end
     tip.dgsjID = id
-    local _, _, hoverWorth = Worth(id, 1)
+    -- Stack total, not unit price: the candidates are ranked on stack totals, so
+    -- the looted item has to be measured the same way or the comparison is unfair
+    -- to the loot.
+    local qty = LootTipQuantity(tip)
+    local hoverWorth = select(1, Worth(id, qty))
     if not hoverWorth then dbg("no value for id", id, "(info not cached)"); return end
     if not IsLootTooltip(tip) then return end          -- verdict only in the loot window, not bags
     if IsQuestItem(id) then                            -- always worth taking, never compared on value
@@ -772,7 +788,7 @@ local function AddVerdict(tip, id)
     local worths = {}
     if junk  then worths[#worths + 1] = junk.value  or 0 end
     if other then worths[#worths + 1] = other.value or 0 end
-    dbg("loot verdict id=" .. id, "hover=" .. hoverWorth,
+    dbg("loot verdict id=" .. id, "x" .. qty, "hover=" .. hoverWorth,
         "junk=" .. (junk and (junk.id .. "@" .. (junk.value or 0) .. " x" .. (junk.count or 1)) or "none"),
         "other=" .. (other and (other.id .. "@" .. (other.value or 0) .. " x" .. (other.count or 1)) or "none"))
 
@@ -1314,7 +1330,7 @@ end
 -- `preview` is the ONLY thing a preview passes differently: everything below
 -- (prices, ranking, recommendation, verdict) runs exactly as it does in a real
 -- full-bags situation, so the preview keeps testing the live implementation.
-local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkList, otherList)
+local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkList, otherList, lootCount)
     local f = confirmFrame or BuildConfirm()
     f.slot = slot
     f.preview = preview and true or false
@@ -1336,22 +1352,29 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
     f.lootBtn.icon:SetTexture(ltex)
     f.lootBtn.name:SetText(lname or "?")
     local lid = tonumber((lootLink or ""):match("item:(%d+)"))
-    -- NB: `lid and Worth(lid, 1)` would truncate the multiple returns to one,
+    -- A loot slot can hold a stack, and the whole stack is what the bag slot buys
+    -- you. Every number on this side is therefore a stack TOTAL, the same measure
+    -- the candidates use - otherwise a stack of 5 would be judged as one item
+    -- against a candidate's full stack and always look like a bad trade.
+    local lcount = lootCount or 1
+    -- NB: `lid and Worth(lid, n)` would truncate the multiple returns to one,
     -- so the worth has to be pulled inside the branch.
     local lworth, lvendor
     if lid then
-        local _, vend, each = Worth(lid, 1)
-        lworth, lvendor = each, vend
+        local total, vend = Worth(lid, lcount)
+        lworth, lvendor = total, (vend or 0) * lcount
         if not lworth then                                   -- item info not cached yet
-            lworth = select(11, GetItemInfo(lootLink)) or 0   -- 11 = sellPrice
-            lvendor = lworth
+            local sell = select(11, GetItemInfo(lootLink)) or 0   -- 11 = sellPrice
+            lworth, lvendor = sell * lcount, sell * lcount
         end
     end
     -- Vendor on top, AH underneath when Auctionator has a price. The verdict below
     -- still uses lworth (whichever basis the setting ranks on), so what decides and
     -- what is displayed stay independent.
-    f.lootBtn.price:SetText(lvendor and ("|cffffffff" .. Coin(lvendor) .. "|r") or "")
-    local lah = lid and AHPrice(lid)
+    f.lootBtn.price:SetText((lvendor and ("|cffffffff" .. Coin(lvendor) .. "|r") or "") ..
+        " " .. GREY .. "(x" .. lcount .. ")|r")
+    local lahEach = lid and AHPrice(lid)
+    local lah = lahEach and (lahEach * lcount)
     f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. "AH:|r " .. Coin(lah)) or "")
 
     -- Callers that have the ranked lists pass them; the single records stay the
@@ -1362,7 +1385,7 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
     f.junkIdx, f.otherIdx = 1, 1        -- every dialog opens on the cheapest
     dbg("dialog open:", f.preview and "[preview]" or "[live]",
         "loot=" .. tostring(lname or lootLink), "id=" .. tostring(lid),
-        "worth=" .. tostring(lworth or 0) .. "c vendor=" .. tostring(lvendor or 0) .. "c",
+        "x" .. lcount, "worth=" .. tostring(lworth or 0) .. "c vendor=" .. tostring(lvendor or 0) .. "c",
         "ah=" .. tostring(lah or 0) .. "c",
         "| lists junk=" .. #f.junkList, "other=" .. #f.otherList,
         "| lootSlot=" .. tostring(slot),
@@ -1439,7 +1462,7 @@ local function PreviewLootConfirm()
         "| picked", RecTag(pick),
         "| junk=" .. RecTag(junkRec), "| other=" .. RecTag(otherRec),
         "| lists junk=" .. #(junkList or {}), "other=" .. #(otherList or {}))
-    ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true, junkList, otherList)
+    ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true, junkList, otherList, pick.count)
 end
 
 -- Is a PREVIEW dialog currently up? A real full-bags dialog does not count - the
@@ -1484,7 +1507,7 @@ local function LootAssistClick(self)
     dbg("loot-assist: slot", slot, "item", tostring(lid),
         "| junk=" .. RecTag(junkRec), "| other=" .. RecTag(otherRec))
     -- the pick-an-item dialog IS the confirm (choose which to delete, or Cancel)
-    ShowLootConfirm(lootLink, junkRec, otherRec, slot, nil, junkList, otherList)
+    ShowLootConfirm(lootLink, junkRec, otherRec, slot, nil, junkList, otherList, need)
 end
 local function HookLootButtons()
     local n = (GetNumLootItems and GetNumLootItems()) or 0
@@ -1567,9 +1590,12 @@ local function ColorLootRows()
                 if id and IsQuestItem(id) then
                     tint:SetColorTexture(0.15, 0.95, 0.25, 1); tint:Show()
                 elseif id then
-                    local _, _, worthEach = Worth(id, 1)
-                    if worthEach then
-                        if worthEach > lo then tint:SetColorTexture(0.15, 0.95, 0.25, 1)
+                    -- The looted STACK is what you get for the slot, so a stack of
+                    -- 5 is worth five times one. Comparing one unit against a
+                    -- candidate's full stack value would understate the loot.
+                    local lootWorth = select(1, Worth(id, qty))
+                    if lootWorth then
+                        if lootWorth > lo then tint:SetColorTexture(0.15, 0.95, 0.25, 1)
                         else                   tint:SetColorTexture(1.00, 0.20, 0.15, 1) end
                         tint:Show()
                     end
