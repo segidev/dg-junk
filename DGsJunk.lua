@@ -857,7 +857,7 @@ local function CloseLootConfirm()
 end
 local function BuildConfirm()
     local f = CreateFrame("Frame", "DGsJunkConfirm", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(440, 210)
+    f:SetSize(440, 224)   -- 210 + one line, the icons carry a vendor and an AH row
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:EnableMouse(true)
@@ -890,8 +890,13 @@ local function BuildConfirm()
         b.name:SetPoint("TOP", b, "BOTTOM", 0, -3); b.name:SetWidth(104); b.name:SetJustifyH("CENTER"); b.name:SetHeight(24)
         b.price = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         b.price:SetPoint("TOP", b.name, "BOTTOM", 0, -1)
+        -- Second price line: the AH value, shown whenever Auctionator has one, no
+        -- matter which basis "Suggest by AH" is ranking on. The setting picks what
+        -- the recommendation is computed from; it should not hide the other number.
+        b.ah = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        b.ah:SetPoint("TOP", b.price, "BOTTOM", 0, -1)
         b.tag = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        b.tag:SetPoint("TOP", b.price, "BOTTOM", 0, -1)
+        b.tag:SetPoint("TOP", b.ah, "BOTTOM", 0, -1)
         return b
     end
 
@@ -936,15 +941,21 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
     local lid = tonumber((lootLink or ""):match("item:(%d+)"))
     -- NB: `lid and Worth(lid, 1)` would truncate the multiple returns to one,
     -- so the worth has to be pulled inside the branch.
-    local lworth
+    local lworth, lvendor
     if lid then
-        local _, _, each = Worth(lid, 1)
-        lworth = each
+        local _, vend, each = Worth(lid, 1)
+        lworth, lvendor = each, vend
         if not lworth then                                   -- item info not cached yet
             lworth = select(11, GetItemInfo(lootLink)) or 0   -- 11 = sellPrice
+            lvendor = lworth
         end
     end
-    f.lootBtn.price:SetText(lworth and ("|cffffffff" .. Coin(lworth) .. "|r") or "")
+    -- Vendor on top, AH underneath when Auctionator has a price. The verdict below
+    -- still uses lworth (whichever basis the setting ranks on), so what decides and
+    -- what is displayed stay independent.
+    f.lootBtn.price:SetText(lvendor and ("|cffffffff" .. Coin(lvendor) .. "|r") or "")
+    local lah = lid and AHPrice(lid)
+    f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. "AH:|r " .. Coin(lah)) or "")
 
     local function fill(b, rec)
         if not rec then b:Hide(); return end
@@ -955,9 +966,12 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
         b.name:SetText(n or ("item " .. rec.id))
         -- Total first, stack size after it ("3c (x3)"): the recommendation compares
         -- total stack value, so the total has to be the number you actually see.
-        local each, cnt = rec.worthEach or 0, rec.count or 1
-        b.price:SetText("|cffffffff" .. Coin(each * cnt) .. "|r" ..
-            (cnt > 1 and (" " .. GREY .. "(x" .. cnt .. ")|r") or ""))
+        -- Both rows are stack totals, so vendor and AH are directly comparable.
+        local cnt = rec.count or 1
+        local stack = (cnt > 1) and (" " .. GREY .. "(x" .. cnt .. ")|r") or ""
+        b.price:SetText("|cffffffff" .. Coin((rec.each or 0) * cnt) .. "|r" .. stack)
+        local ahEach = AHPrice(rec.id)
+        b.ah:SetText((ahEach and ahEach > 0) and (GREY .. "AH:|r " .. Coin(ahEach * cnt)) or "")
         b.tag:SetText("")
         b.bg:SetColorTexture(0.3, 0.3, 0.3, 1)
     end
