@@ -44,6 +44,15 @@ local dragging = false
 local function BeginDrag() dragging = true; GameTooltip:Hide() end
 local function EndDrag()   dragging = false end
 
+-- Preview mode (Debug tab > "Show comparison dialog"). Previews go through the
+-- SAME code path the game uses, with real bag items and the real ranking, so what
+-- you see can never drift from the live behaviour. The only difference is this
+-- flag: while it is set every acting path bails out, deletes and ignores alike.
+-- It is armed right before a preview dialog is shown and cleared on that dialog's
+-- OnHide, so it can never outlive the dialog it belongs to.
+local previewMode = false
+local PreviewBtnSync    -- fwd decl: keeps the Debug tab's toggle label in sync
+
 -- Items we never delete (protection list), e.g. Hearthstone.
 local exclusions = { [6948] = true, [184871] = true, [260221] = true }
 
@@ -184,6 +193,9 @@ StaticPopupDialogs["DGSJUNK_CONFIRM_DELETE_RARE"] = {
 
 local function DeleteRecord(rec, tag, confirmed)
     if not rec or not rec.bag then return end
+    -- Hardcore: a delete cannot be undone, so the preview guard sits on the
+    -- delete itself, not only on the buttons that reach it.
+    if previewMode then dbg("preview: delete suppressed for item " .. tostring(rec.id)); return end
     if GetCursorInfo() then return end                 -- something already on cursor
     local link = select(2, GetItemInfo(rec.id or 0))
     local quality = select(3, GetItemInfo(rec.id or 0))
@@ -829,6 +841,7 @@ end
 
 local function DoLootClear(rec, slot)
     if not rec then return end
+    if previewMode then dbg("preview: loot-clear suppressed"); return end
     -- Never trade an item for nothing: if the loot went away between opening the
     -- dialog and clicking (ran off, corpse despawned, someone else looted it),
     -- abort instead of deleting.
@@ -874,14 +887,43 @@ local function BuildConfirm()
     local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("TOP", 0, -26)
     head:SetText("Bags full - click a junk/item to delete and loot:")
+    f.head = head
+    -- Preview banner: hidden in normal use, so the live dialog is unchanged.
+    local banner = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    -- below the "tag" line under the icons; the frame grows by the same amount
+    -- in preview so it never collides with the Cancel button.
+    banner:SetPoint("TOP", 0, -186)
+    banner:Hide()
+    f.banner = banner
 
     local function Slot(cap, x)
         local b = CreateFrame("Button", nil, f)
         b:SetSize(40, 40)
         b:SetPoint("TOPLEFT", x, -66)
-        b.bg = b:CreateTexture(nil, "BACKGROUND")
-        b.bg:SetPoint("TOPLEFT", -2, 2); b.bg:SetPoint("BOTTOMRIGHT", 2, -2)
-        b.bg:SetColorTexture(0.3, 0.3, 0.3, 1)
+        -- Four thin edges rather than one filled rectangle behind the icon. For a
+        -- filled slot they look identical (the icon covered the middle anyway),
+        -- but an EMPTY slot then keeps the same border with nothing painted
+        -- inside it, so the frame background shows through instead of a grey box.
+        b.edges = {}
+        for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+            local t = b:CreateTexture(nil, "BACKGROUND")
+            if side == "TOP" or side == "BOTTOM" then
+                t:SetPoint("LEFT",  b, "LEFT",  -2, 0)
+                t:SetPoint("RIGHT", b, "RIGHT",  2, 0)
+                t:SetHeight(2)
+                t:SetPoint(side, b, side, 0, side == "TOP" and 2 or -2)
+            else
+                t:SetPoint("TOP",    b, "TOP",     0,  2)
+                t:SetPoint("BOTTOM", b, "BOTTOM",  0, -2)
+                t:SetWidth(2)
+                t:SetPoint(side, b, side, side == "LEFT" and -2 or 2, 0)
+            end
+            b.edges[#b.edges + 1] = t
+        end
+        b.SetBorder = function(r, g, bl)
+            for _, t in ipairs(b.edges) do t:SetColorTexture(r, g, bl, 1) end
+        end
+        b.SetBorder(0.3, 0.3, 0.3)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetAllPoints(); b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
         b.cap = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -917,6 +959,10 @@ local function BuildConfirm()
         b:SetScript("OnEnter", hover("ANCHOR_RIGHT"))
         b:SetScript("OnLeave", GameTooltip_Hide)
         b:SetScript("OnClick", function(self)
+            if f.preview then
+                print(GOLD .. "DGs Junk|r preview mode - nothing was deleted.")
+                return                                   -- dialog stays open so you can keep poking at it
+            end
             if self.rec then f:Hide(); DoLootClear(self.rec, f.slot) end
         end)
     end
@@ -925,14 +971,37 @@ local function BuildConfirm()
     cancel:SetSize(120, 24); cancel:SetPoint("BOTTOM", 0, 12); cancel:SetText(CANCEL or "Cancel")
     cancel:SetScript("OnClick", function() f:Hide() end)
 
+    -- Disarming on OnHide (rather than at the end of the preview call) means the
+    -- flag is tied to the dialog's lifetime: Escape, the X, Cancel and
+    -- CloseLootConfirm all clear it.
+    f:SetScript("OnHide", function(self)
+        self.preview = nil
+        previewMode = false
+        if PreviewBtnSync then PreviewBtnSync() end   -- closing it flips the Debug tab button back
+    end)
+
     f:Hide()
     confirmFrame = f
     return f
 end
 
-local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
+-- `preview` is the ONLY thing a preview passes differently: everything below
+-- (prices, ranking, recommendation, verdict) runs exactly as it does in a real
+-- full-bags situation, so the preview keeps testing the live implementation.
+local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview)
     local f = confirmFrame or BuildConfirm()
     f.slot = slot
+    f.preview = preview and true or false
+    previewMode = f.preview
+    f:SetHeight(f.preview and 250 or 224)
+    if f.preview then
+        f.head:SetText(GOLD .. "DEBUG PREVIEW|r - real items, real ranking:")
+        f.banner:SetText(RED .. "Preview Mode: All actions are only for testing, nothing will be deleted or ignored.|r")
+        f.banner:Show()
+    else
+        f.head:SetText("Bags full - click a junk/item to delete and loot:")
+        f.banner:Hide()
+    end
 
     local lname, _, _, _, _, _, _, _, _, ltex = GetItemInfo(lootLink)
     f.lootBtn.link = lootLink; f.lootBtn.itemID = nil
@@ -957,9 +1026,23 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
     local lah = lid and AHPrice(lid)
     f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. "AH:|r " .. Coin(lah)) or "")
 
-    local function fill(b, rec)
-        if not rec then b:Hide(); return end
+    -- Both slots are ALWAYS drawn. An empty one keeps the dialog's shape stable
+    -- and says why it is empty ("no junk") instead of silently vanishing, which
+    -- reads as a broken dialog. `empty` is the wording for that slot.
+    local function fill(b, rec, empty)
         b:Show()
+        if not rec then
+            b.rec, b.itemID, b.link = nil, nil, nil     -- no tooltip, and OnClick finds no record
+            b.icon:SetTexture(nil)          -- nothing painted inside: the frame shows through
+            -- The reason goes on the NAME line, where an item's name would be. On
+            -- the price line it reads as if the item cost "no junk".
+            b.name:SetText(GREY .. empty .. "|r")
+            b.price:SetText("")
+            b.ah:SetText("")
+            b.tag:SetText("")
+            b.SetBorder(0.3, 0.3, 0.3)      -- same neutral border as a filled slot
+            return
+        end
         local n, _, _, _, _, _, _, _, _, tex = GetItemInfo(rec.id)
         b.rec = rec; b.itemID = rec.id; b.link = nil
         b.icon:SetTexture(tex)
@@ -973,17 +1056,19 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
         local ahEach = AHPrice(rec.id)
         b.ah:SetText((ahEach and ahEach > 0) and (GREY .. "AH:|r " .. Coin(ahEach * cnt)) or "")
         b.tag:SetText("")
-        b.bg:SetColorTexture(0.3, 0.3, 0.3, 1)
+        b.SetBorder(0.3, 0.3, 0.3)
     end
-    fill(f.junkBtn, junkRec)
-    fill(f.otherBtn, otherRec)
+    fill(f.junkBtn, junkRec, "no junk")
+    fill(f.otherBtn, otherRec, "no other item")
 
     -- recommend (green border + tag) the cheaper of the two
     local rj = junkRec and junkRec.value or math.huge
     local ro = otherRec and otherRec.value or math.huge
     local best = (rj <= ro) and f.junkBtn or f.otherBtn
-    if (junkRec or otherRec) and best:IsShown() then
-        best.bg:SetColorTexture(0.1, 0.85, 0.2, 1)
+    -- Both slots are always shown now, so visibility is no longer proof that the
+    -- slot holds anything - the recommendation has to key off the record itself.
+    if best.rec then
+        best.SetBorder(0.1, 0.85, 0.2)
         best.tag:SetText(GREEN .. "recommended|r")
     end
 
@@ -992,21 +1077,105 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot)
     -- stack you would have to destroy. Green border = trade up, red = don't bother.
     local lo = math.min(rj, ro)
     if lid and IsQuestItem(lid) then
-        f.lootBtn.bg:SetColorTexture(0.1, 0.85, 0.2, 1)
+        f.lootBtn.SetBorder(0.1, 0.85, 0.2)
         f.lootBtn.tag:SetText(GREEN .. "quest - take it|r")
     elseif lworth and lo < math.huge then
         if lworth > lo then
-            f.lootBtn.bg:SetColorTexture(0.1, 0.85, 0.2, 1)
+            f.lootBtn.SetBorder(0.1, 0.85, 0.2)
             f.lootBtn.tag:SetText(GREEN .. "worth it|r")
         else
-            f.lootBtn.bg:SetColorTexture(0.85, 0.15, 0.15, 1)
+            f.lootBtn.SetBorder(0.85, 0.15, 0.15)
             f.lootBtn.tag:SetText(RED .. "not worth it|r")
         end
     else
-        f.lootBtn.bg:SetColorTexture(0.3, 0.3, 0.3, 1)
+        f.lootBtn.SetBorder(0.3, 0.3, 0.3)
         f.lootBtn.tag:SetText("")
     end
     f:Show()
+end
+
+------------------------------------------------ dialog preview (debug)
+-- Opens the real comparison dialog with real items out of the player's bags, so
+-- the layout, the prices, the recommendation and the verdict are all produced by
+-- the live code. Nothing here mocks a record: the two replace candidates come
+-- from LootClearCandidates() (the same call the loot assist makes) and every
+-- price goes through Worth().
+local function PreviewRecords()
+    local list = {}
+    for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
+        for slot = 1, (GetContainerNumSlots(bag) or 0) do
+            local id = GetContainerItemID(bag, slot)
+            if id and not exclusions[id] and not IsQuestItem(id) then
+                local count = SlotCount(bag, slot)
+                local value, each, worthEach = Worth(id, count)
+                if value then
+                    list[#list + 1] = { bag = bag, slot = slot, id = id, count = count,
+                                        value = value, each = each, worthEach = worthEach,
+                                        junk = IsJunk(id) }
+                end
+            end
+        end
+    end
+    return list
+end
+
+local function PreviewLootConfirm()
+    -- the real candidate scan first - that is what we actually want to look at
+    local junkRec, otherRec = LootClearCandidates()
+    local all = PreviewRecords()
+    if #all == 0 then
+        print(GOLD .. "DGs Junk|r preview: no usable items in your bags.")
+        return
+    end
+    -- No substitutes for missing candidates: an empty slot now renders as
+    -- "no junk" / "no other item", which IS what the live dialog does, so the
+    -- preview shows it rather than inventing a record to fill the gap.
+    if not junkRec then dbg("preview: no junk candidate - the slot renders empty") end
+    if not otherRec then dbg("preview: no non-junk candidate - the slot renders empty") end
+
+    local lo = math.min(junkRec and junkRec.value or math.huge,
+                        otherRec and otherRec.value or math.huge)
+    -- Prefer an item that is worth MORE than either candidate, so the dialog
+    -- shows its "worth it" verdict; if the bags hold nothing that beats them,
+    -- any item will do (the red "not worth it" verdict is just as valid a thing
+    -- to look at).
+    -- LootClearCandidates() builds its own record tables, so identity comparison
+    -- would never match - the same bag slot has to be excluded by bag/slot.
+    local function same(c, r) return c and c.bag == r.bag and c.slot == r.slot end
+    local function isCandidate(r) return same(junkRec, r) or same(otherRec, r) end
+    local better, rest = {}, {}
+    for _, r in ipairs(all) do
+        if not isCandidate(r) then
+            rest[#rest + 1] = r
+            if (r.worthEach or 0) > lo then better[#better + 1] = r end
+        end
+    end
+    local pool = better
+    if #pool == 0 then
+        pool = (#rest > 0) and rest or all
+        dbg("preview: nothing in bags beats the candidates, showing a plain item")
+    end
+    local pick = pool[math.random(#pool)]
+
+    local link = select(2, GetItemInfo(pick.id))
+    dbg("preview: loot=" .. tostring(pick.id), "junk=" .. (junkRec and junkRec.id or "-"),
+        "other=" .. (otherRec and otherRec.id or "-"))
+    ShowLootConfirm(link or ("item:" .. pick.id), junkRec, otherRec, nil, true)
+end
+
+-- Is a PREVIEW dialog currently up? A real full-bags dialog does not count - the
+-- Debug button must never offer to close a live one.
+local function PreviewShown()
+    return (confirmFrame and confirmFrame:IsShown() and confirmFrame.preview) and true or false
+end
+
+local function PreviewToggle()
+    if PreviewShown() then
+        confirmFrame:Hide()          -- OnHide disarms the flag and syncs the button
+    else
+        PreviewLootConfirm()
+        if PreviewBtnSync then PreviewBtnSync() end
+    end
 end
 
 local hookedButtons = {}
@@ -1507,6 +1676,12 @@ BuildConfig = function()
     -- Hide directly so it works mid-fight.
     local closeBtn = config.CloseButton or _G["DGsJunkConfigCloseButton"]
     if closeBtn then closeBtn:SetScript("OnClick", function() config:Hide() end) end
+    -- A preview belongs to the Debug tab: closing the settings window takes it
+    -- with it, and its OnHide resets the toggle back to "Show". A real full-bags
+    -- dialog is untouched - it has nothing to do with this window.
+    config:SetScript("OnHide", function()
+        if confirmFrame and confirmFrame:IsShown() and confirmFrame.preview then confirmFrame:Hide() end
+    end)
 
     -- panels
     local function Panel()
@@ -1516,7 +1691,7 @@ BuildConfig = function()
         p:Hide()
         return p
     end
-    config.panels = { ignored = Panel(), junk = Panel(), settings = Panel(), log = Panel() }
+    config.panels = { ignored = Panel(), junk = Panel(), settings = Panel(), debug = Panel(), log = Panel() }
 
     local function ShowTab(name)
         for k, p in pairs(config.panels) do p:SetShown(k == name) end
@@ -1539,6 +1714,7 @@ BuildConfig = function()
             if config.checks and config.checks.debug then config.checks.debug.Refresh() end
             if config.ApplyLogVis then config.ApplyLogVis() end
         end
+        if name == "debug" and PreviewBtnSync then PreviewBtnSync() end
         if name == "ignored" then RefreshConfig() end
         if name == "junk" and RefreshJunkList then RefreshJunkList() end
     end
@@ -1553,10 +1729,14 @@ BuildConfig = function()
 
     -- tab buttons
     config.tabBtns = {}
-    local order = { { "settings", "Settings" }, { "ignored", "Ignored" }, { "junk", "Junk" }, { "log", "Log" } }
+    local order = { { "settings", "Settings" }, { "ignored", "Ignored" }, { "junk", "Junk" },
+                    { "debug", "Debug" }, { "log", "Log" } }
+    -- Derive the tab width from the count so adding a tab never overflows the
+    -- 480px frame (8px margin each side, 4px gutters).
+    local tabW = math.floor((480 - 16 - (#order - 1) * 4) / #order)
     for i, t in ipairs(order) do
-        local b = ConfigBtn(config, t[2], 110, function() ShowTab(t[1]) end)
-        b:SetPoint("TOPLEFT", 8 + (i - 1) * 114, -52)
+        local b = ConfigBtn(config, t[2], tabW, function() ShowTab(t[1]) end)
+        b:SetPoint("TOPLEFT", 8 + (i - 1) * (tabW + 4), -52)
         -- selection art, hidden until ShowTab marks this tab active
         b.sel = b:CreateTexture(nil, "OVERLAY")
         b.sel:SetAllPoints()
@@ -1827,6 +2007,31 @@ BuildConfig = function()
         if config.profileCopyTo   then config.profileCopyTo:SetShown(not onDefault) end
     end
 
+    --====================== DEBUG panel ======================--
+    -- Testing aids. Every dialog here is opened through its real code path with
+    -- real bag items, so what you see is what the game shows - only the actions
+    -- are suppressed.
+    local dp = config.panels.debug
+    local dhint = dp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    dhint:SetPoint("TOPLEFT", 4, -2)
+    dhint:SetPoint("RIGHT", dp, "RIGHT", -8, 0)
+    dhint:SetJustifyH("LEFT"); dhint:SetWordWrap(true)
+    dhint:SetText("Open the addon's dialogs on demand, without having to fill your bags first. They use your real items and the real ranking; clicking anything in them does nothing - " .. RED .. "nothing is ever deleted|r.")
+
+    local pv = ConfigBtn(dp, "Show comparison dialog", 220, PreviewToggle)
+    pv:SetPoint("TOPLEFT", 8, -56)
+    BtnHint(pv, "Full-bags comparison dialog",
+        "Picks a random bag item worth more than your two cheapest, so the \"worth it\" verdict shows. Also available as /dgjunk preview.")
+    config.previewBtn = pv
+
+    -- Single source of truth for the label: the dialog's own visibility. Closing
+    -- it any way at all (X, Escape, Cancel) runs its OnHide, which calls this.
+    PreviewBtnSync = function()
+        if not (config and config.previewBtn) then return end
+        config.previewBtn:SetText(PreviewShown() and "Hide comparison dialog" or "Show comparison dialog")
+    end
+    PreviewBtnSync()
+
     --====================== LOG panel ======================--
     local lp = config.panels.log
 
@@ -1888,6 +2093,7 @@ end
 RefreshConfig = function()
     if not config then return end
     if config.checks then for _, cb in pairs(config.checks) do cb.Refresh() end end
+    if PreviewBtnSync then PreviewBtnSync() end
     if config.scaleSlider then config.scaleSlider.Refresh() end
     if config.RefreshProfile then config.RefreshProfile() end
     if not config.rows then return end
@@ -1992,7 +2198,13 @@ end
 
 -------------------------------------------------------------------- slash
 SLASH_DGSJUNK1 = "/dgjunk"
-SlashCmdList.DGSJUNK = function()
+SlashCmdList.DGSJUNK = function(msg)
+    local cmd = (msg or ""):lower():match("^%s*(%S*)")
+    if cmd == "preview" then
+        if not config then BuildConfig() end     -- the Debug tab owns the label sync
+        PreviewToggle()
+        return
+    end
     if not config then BuildConfig() end
     if config:IsShown() then
         config:Hide()
