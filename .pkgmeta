@@ -9,4 +9,6 @@ manual-changelog:
 ignore:
   - docs
   - dist
+  - tools
   - .gitignore
+  - .luarc.json

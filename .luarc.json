@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "Lua 5.1",
+  "diagnostics.disable": [
+    "lowercase-global",
+    "undefined-field",
+    "need-check-nil",
+    "cast-local-type"
+  ],
+  "diagnostics.globals": [
+    "DGsJunkDB",
+
+    "C_Container", "C_Item", "C_Timer", "C_TradeSkillUI",
+    "Enum", "MenuUtil", "TooltipUtil", "Settings",
+
+    "CreateFrame", "UIParent", "GameTooltip", "GameTooltip_Hide", "ItemRefTooltip",
+    "UISpecialFrames", "StaticPopupDialogs", "StaticPopup_Show", "HideUIPanel",
+    "LootFrame", "MerchantFrame", "ContainerFrame_Update", "ContainerFrameItemButton_OnUpdate",
+    "EasyMenu", "UIDropDownMenuTemplate", "Minimap",
+    "C_TooltipInfo", "TooltipDataProcessor", "ChatFontNormal",
+
+    "GetItemInfo", "GetItemCount", "GetContainerNumSlots", "GetContainerItemID",
+    "GetContainerItemInfo", "GetContainerNumFreeSlots", "PickupContainerItem",
+    "UseContainerItem", "DeleteCursorItem", "GetCursorInfo", "ClearCursor",
+    "GetNumLootItems", "GetLootSlotLink", "GetLootSlotInfo", "LootSlot",
+    "LootSlotHasItem", "GetMerchantItemLink",
+    "GetLootRollItemLink", "GetCursorPosition",
+    "UnitName", "GetRealmName", "IsShiftKeyDown", "IsControlKeyDown", "IsAltKeyDown",
+    "InCombatLockdown", "hooksecurefunc", "issecurevariable",
+    "SlashCmdList", "SLASH_DGSJUNK1", "ReloadUI",
+
+    "BACKPACK_CONTAINER", "NUM_BAG_FRAMES", "ITEM_QUALITY_COLORS",
+    "CANCEL", "YES", "NO", "ACCEPT", "CLOSE", "ITEM_OPENABLE",
+
+    "date", "time", "strsplit", "strjoin", "strtrim", "tinsert", "tremove", "wipe",
+    "format", "gsub", "strfind", "strmatch", "strsub", "strlower", "strupper",
+
+    "Auctionator", "Bagnon"
+  ]
+}

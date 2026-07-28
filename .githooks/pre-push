@@ -1,0 +1,46 @@
+#!/bin/sh
+# DGs Junk - pre-push gate.
+#
+# Nothing leaves this machine until the Lua pre-check passes. A syntax error or an
+# undefined global that reaches CurseForge is a broken addon for everyone who
+# auto-updates, and the packager will happily build it.
+#
+# Deliberately fails when the tools are MISSING rather than skipping the check:
+# a silently skipped gate is worse than no gate, because it reads as "checked".
+#
+# Enabled via core.hooksPath (see tools/install-hooks.ps1), so the hook is version
+# controlled instead of living only in .git/hooks on one machine.
+
+repo="$(git rev-parse --show-toplevel)"
+check="$repo/tools/check.ps1"
+
+if [ ! -f "$check" ]; then
+    echo "pre-push: tools/check.ps1 is missing - cannot verify, refusing to push." >&2
+    exit 1
+fi
+
+# Find PowerShell. Git Bash on Windows has it on PATH as powershell.exe; fall back
+# to the known absolute path if a stripped PATH hides it.
+ps=""
+if command -v powershell.exe >/dev/null 2>&1; then
+    ps="powershell.exe"
+elif [ -x "/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
+    ps="/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+else
+    echo "pre-push: powershell.exe not found - cannot run the pre-check, refusing to push." >&2
+    exit 1
+fi
+
+echo "pre-push: running the Lua pre-check..."
+"$ps" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$check" 2>/dev/null || echo "$check")"
+status=$?
+
+if [ $status -ne 0 ]; then
+    echo "" >&2
+    echo "pre-push: PRE-CHECK FAILED - push aborted." >&2
+    echo "Fix the findings above, or add a genuine WoW global to .luarc.json." >&2
+    exit 1
+fi
+
+echo "pre-push: clean - pushing."
+exit 0

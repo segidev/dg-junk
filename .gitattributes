@@ -1,0 +1,5 @@
+# Git hooks are run by sh (Git for Windows). With core.autocrlf=true they would be
+# checked out with CRLF, and sh fails on "#!/bin/sh\r" with a bad-interpreter
+# error - so the push gate would silently stop working on a fresh clone.
+.githooks/* text eol=lf
+*.sh        text eol=lf
