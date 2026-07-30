@@ -14,7 +14,7 @@ Standalone, no libraries required. [Auctionator](https://www.curseforge.com/wow/
 - **Junk and Ignored tabs.** Per-row removal and bulk resets. Nothing on these tabs touches your bags.
 - **Profiles.** Settings are account-wide; marks and the ignore list live in a shared **Default** profile or this character's own, with copy-in / copy-out buttons.
 - **Copyable diagnostic log**: debug output never goes to chat.
-- **English and German.** On a German client everything the addon shows is in German — icons, loot verdicts, dialogs, menus and settings. It follows the game's language by default, and a picker in the settings can override it either way — it offers to reload your interface, since a language cannot be swapped on an open window.
+- **English and German.** On a German client everything the addon shows is in German: icons, loot verdicts, dialogs, menus and settings. It follows the game's language by default, and a picker in the settings can override it either way. Picking one offers to reload your interface, since a language cannot be swapped on a window that is already drawn.
 
 Quest items are never suggested, never auto-sold and never deletable, even if marked.
 
