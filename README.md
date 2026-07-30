@@ -26,7 +26,7 @@ auction-house value. Hover for the item tooltip and the available actions.
 
 - **Two floating icons**
   - **Junk**, the cheapest item you consider junk: gray (Poor) quality, plus anything you marked yourself.
-  - **Cheap!**, the cheapest *non-junk* item, shown independently. Stuff you never flagged that is
+  - **Normal**, the cheapest *non-junk* item, shown independently. Stuff you never flagged that is
     quietly worth less than your trash. Hidden when nothing qualifies.
 - **Icon interactions**
   - **Shift-left-click**, delete that item. Grays go instantly, whites raise Blizzard's confirm,
@@ -59,6 +59,11 @@ auction-house value. Hover for the item tooltip and the available actions.
   **Default** profile or in this character's own, picked from a dropdown. Both always exist, and
   *Copy from Default* / *Copy to Default* move entries between them.
 
+- **English and German**. The language follows the client by default; a picker in the settings
+  (*Automatic* / *English* / *Deutsch*) overrides it either way. Picking one asks before reloading
+  your interface, and declines while you are in combat. An untranslated line falls back to English
+  rather than rendering blank.
+
 Quest items are never suggested, never auto-sold and never deletable, even if marked.
 
 ## Screenshots
@@ -66,8 +71,8 @@ Quest items are never suggested, never auto-sold and never deletable, even if ma
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src="docs/images/loot-verdict.png" alt="Loot tooltip verdict">
-<p>Hovering loot gives a verdict against your cheapest discardable item.</p>
+<img src="docs/images/loot-verdict.png" alt="Loot tooltip verdict and coloured loot rows">
+<p>Hovering loot gives a verdict against your cheapest discardable item, and every row is tinted green or red so the window reads at a glance.</p>
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/context-menu.png" alt="Right-click context menu">

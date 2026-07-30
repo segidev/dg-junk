@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2
+
+The addon now speaks German, and the second icon got a clearer name.
+
+- **German translation.** On a German client every line the addon shows you is in German: the two
+  icons and their tooltips, the loot verdicts, the comparison dialog, the context menu, all four
+  tabs, the settings and their explanations, and the confirmation dialogs. Nothing needs to be
+  switched on and no other client is affected — the language follows the game. Should a line ever
+  be missing a translation it simply shows in English instead of coming up blank.
+- **Language picker** in the settings. It sits above the profile section and offers *Automatic
+  (game language)*, *English* and *Deutsch*. Automatic is the default and is what you get without
+  touching anything; the other two override the client, so you can run a German game with the addon
+  in English or the other way round. The choice is account-wide. Because a language cannot be
+  swapped on a window that is already drawn, picking one asks whether to reload your interface and
+  then does it for you — cancel and nothing is changed at all. It refuses while you are in combat.
+- The **Cheap!** icon is now called **Normal**. It never meant "this is cheap", it means "this is
+  the cheapest item you did *not* flag as junk", and Junk / Normal are the two categories the rest
+  of the addon already used — the ignore list, its reset buttons and the comparison dialog all say
+  Junk and Normal. The icon now matches them.
+
 ## 1.1.1
 
 - Fixed: items being rolled for in a group no longer get a keep-or-discard verdict. While a green

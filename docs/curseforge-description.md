@@ -14,12 +14,13 @@ Standalone, no libraries required. [Auctionator](https://www.curseforge.com/wow/
 - **Junk and Ignored tabs.** Per-row removal and bulk resets. Nothing on these tabs touches your bags.
 - **Profiles.** Settings are account-wide; marks and the ignore list live in a shared **Default** profile or this character's own, with copy-in / copy-out buttons.
 - **Copyable diagnostic log**: debug output never goes to chat.
+- **English and German.** On a German client everything the addon shows is in German — icons, loot verdicts, dialogs, menus and settings. It follows the game's language by default, and a picker in the settings can override it either way — it offers to reload your interface, since a language cannot be swapped on an open window.
 
 Quest items are never suggested, never auto-sold and never deletable, even if marked.
 
 ## Worth calculation
 
-Items are ranked by real worth: vendor price, or the Auctionator AH price when *Suggest by AH* is enabled and data exists. Ranking uses the stack's total value, while the loot comparison uses per-item worth, so a stack of cheap junk no longer outranks a genuinely valuable single item.
+Items are ranked by real worth: vendor price, or the Auctionator AH price when *Suggest by AH* is enabled and data exists. Both sides of the comparison are measured as a **stack total**, because a bag slot holds a whole stack: destroying a slot costs you all of it, and looting one gains you all of it. A stack of 4 meat is judged as 4, against the full value of the stack you would discard.
 
 ## Slash command
 
@@ -27,7 +28,7 @@ Items are ranked by real worth: vendor price, or the Auctionator AH price when *
 
 ## Compatibility
 
-Built for WoW **Classic Era / Hardcore**, interface 11509 (patch 1.15.9). Compatible with Bagnon.
+Built for WoW **Classic Era / Hardcore**, interface 11509 (patch 1.15.9). Compatible with Bagnon. Available in English and German (enUS / deDE).
 
 ## Feedback
 
