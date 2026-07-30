@@ -4,14 +4,18 @@
   Junk = Blizzard gray (Poor) quality + our own marks (DB.marks).
 
   Two icons:
-    * JUNK  (gray border)   - cheapest junk item in your bags.
-    * CHEAP (orange border) - cheapest NON-junk item whose value is <= the
-                              cheapest junk (worth less than your trash). Hidden
-                              when nothing qualifies.
+    * JUNK   (gray border)   - cheapest junk item in your bags.
+    * NORMAL (orange border) - cheapest non-junk item whose value is <= the
+                               cheapest junk (worth less than your trash). Hidden
+                               when nothing qualifies.
+  "Junk" and "Normal" are the addon's two categories and are named that way
+  everywhere the player sees them: the icons, the comparison dialog, the ignore
+  list and its reset buttons. The internal frame is still DGsJunk_Cheap.
   Shift-click an icon to delete; shift-right-click to ignore; right-click for a
   menu (delete / mark / ignore / settings). In the loot window, hovering an item
   shows a "worth clearing junk to make room?" verdict; shift-click loot with full
-  bags clears a junk item (with a confirm dialog) and loots the slot.
+  bags opens the comparison dialog, where you pick which item to delete, and
+  clicking that candidate deletes it and loots the slot.
 ----------------------------------------------------------------------------]]
 
 -- API shims (Classic + newer clients)
@@ -29,6 +33,271 @@ local COMMON                 = (Enum and Enum.ItemQuality and Enum.ItemQuality.C
 -- green and up: deleting one of these always costs a second confirmation
 local UNCOMMON               = (Enum and Enum.ItemQuality and
                                (Enum.ItemQuality.Uncommon or Enum.ItemQuality.Good)) or 2
+
+--[[ localization -----------------------------------------------------------
+  The English string IS the key. An untranslated entry falls through the
+  metatable and renders as English, so a missing translation is never a blank
+  label or a nil error - the worst case is an English line in a German client.
+
+  Only what the player reads in normal use is wrapped. Deliberately NOT wrapped:
+  the debug log (dbg/act - it gets pasted into a conversation for analysis, and
+  translating it makes that harder), the slash command and its subcommands, the
+  addon name, frame names and the SavedVariables key.
+
+  Colour codes stay OUTSIDE the keys wherever the string is coloured as a whole,
+  so a translator never has to copy |cff... sequences correctly.
+----------------------------------------------------------------------------]]
+local fmt = string.format
+local L = setmetatable({}, { __index = function(_, k) return k end })
+
+local locales = {}
+
+locales.deDE = {
+    -- chat output
+    ["deleted"]                          = "gelöscht",
+    ["cleared for loot:"]                = "für Beute entsorgt:",
+    ["item"]                             = "Gegenstand",
+    ["item %d"]                          = "Gegenstand %d",
+    ["Item #%d"]                         = "Gegenstand #%d",
+    ["this item"]                        = "dieser Gegenstand",
+    ["rare"]                             = "selten",
+    ["ignoring %s"]                      = "ignoriere %s",
+    ["/dgjunk to manage"]                = "/dgjunk zum Verwalten",
+    ["sold %d marked item(s) for %s."]   = "%d markierte Gegenstände für %s verkauft.",
+    ["loot is gone - nothing deleted."]  = "Beute ist weg, nichts gelöscht.",
+    ["your bags changed - nothing deleted, pick again."] =
+        "Deine Taschen haben sich geändert, nichts gelöscht, wähle erneut.",
+    ["that item is still being rolled for - nothing to clear yet."] =
+        "Auf diesen Gegenstand wird noch gewürfelt, noch nichts zu entsorgen.",
+    ["preview mode - nothing was deleted."] = "Vorschaumodus, es wurde nichts gelöscht.",
+    ["preview mode - nothing was ignored."] = "Vorschaumodus, es wurde nichts ignoriert.",
+    ["preview: no usable items in your bags."] =
+        "Vorschau: keine brauchbaren Gegenstände in deinen Taschen.",
+    ["no menu API; use shift-left = delete, shift-right = ignore, /dgjunk = settings"] =
+        "keine Menü-API; Umschalt-links = löschen, Umschalt-rechts = ignorieren, /dgjunk = Einstellungen",
+    ["development mode %s"]              = "Entwicklermodus %s",
+    ["development mode is off (/dgjunk dev)."] = "Entwicklermodus ist aus (/dgjunk dev).",
+    ["on"]                               = "an",
+    ["off"]                              = "aus",
+    ["- the Debug tab is available"]     = "- der Debug-Reiter ist verfügbar",
+
+    -- context menu
+    ["Ignore %s"]                        = "%s ignorieren",
+    ["Delete %s"]                        = "%s löschen",
+    ["Mark as junk"]                     = "Als Plunder markieren",
+    ["Unmark as junk"]                   = "Plundermarkierung aufheben",
+    ["Settings"]                         = "Einstellungen",
+    ["Cancel"]                           = "Abbrechen",
+
+    -- icons and their tooltips
+    ["Junk"]                             = "Plunder",
+    ["Normal"]                           = "Normal",
+    ["AH"]                               = "AH",
+    ["AH:"]                              = "AH:",
+    ["Shift-left-click"]                 = "Umschalt-Linksklick",
+    ["Shift-right-click"]                = "Umschalt-Rechtsklick",
+    ["Left-click"]                       = "Linksklick",
+    ["Right-click"]                      = "Rechtsklick",
+    ["Left-click:"]                      = "Linksklick:",
+    ["Right-click:"]                     = "Rechtsklick:",
+    ["Drag:"]                            = "Ziehen:",
+    ["Drag to move"]                     = "Ziehen zum Verschieben",
+    ["delete"]                           = "löschen",
+    ["ignore"]                           = "ignorieren",
+    ["settings"]                         = "Einstellungen",
+    ["for menu"]                         = "für das Menü",
+    ["for settings"]                     = "für die Einstellungen",
+    ["for menu (delete / ignore / settings)"] = "für das Menü (löschen / ignorieren / Einstellungen)",
+    ["show/hide frames"]                 = "Fenster ein-/ausblenden",
+    ["move around minimap"]              = "um die Minikarte bewegen",
+    ["Nothing to clear right now."]      = "Im Moment nichts zu entsorgen.",
+
+    -- loot verdicts
+    ["Loot"]                             = "Beute",
+    ["Loot it"]                          = "Mitnehmen",
+    ["Skip"]                             = "Liegen lassen",
+    ["Quest item: Take it!"]             = "Questgegenstand: mitnehmen!",
+    ["quest - take it"]                  = "Quest, mitnehmen",
+    ["worth it"]                         = "lohnt sich",
+    ["not worth it"]                     = "lohnt sich nicht",
+    ["recommended"]                      = "empfohlen",
+    ["costs more than the loot"]         = "teurer als die Beute",
+    ["stacks, costs no bag slot"]        = "stapelbar, kostet keinen Taschenplatz",
+    ["cheapest to discard %s"]           = "günstigster Verlust %s",
+    ["Nothing to clear a slot"]          = "Nichts, um Platz zu schaffen",
+    ["Being rolled for - not yours to take yet"] = "Wird noch ausgewürfelt, noch nicht deiner",
+
+    -- comparison dialog
+    ["Bags full - click a junk/item to delete and loot:"] =
+        "Taschen voll, klicke einen Gegenstand zum Löschen und Plündern:",
+    ["Arrows or mouse wheel over an icon: pick a different item"] =
+        "Pfeile oder Mausrad über einem Symbol: anderen Gegenstand wählen",
+    ["Arrows / mouse wheel:"]            = "Pfeile / Mausrad:",
+    ["pick another item"]                = "anderen Gegenstand wählen",
+    ["delete this and loot"]             = "dies löschen und plündern",
+    ["no junk"]                          = "kein Plunder",
+    ["no normal item"]                   = "kein normaler Gegenstand",
+
+    -- settings window: tabs
+    ["Ignored"]                          = "Ignoriert",
+    ["Debug"]                            = "Debug",
+    ["Log"]                              = "Log",
+
+    -- settings window: Ignored tab
+    ["Ignored items - add via shift-right-click or right-click > Ignore"] =
+        "Ignorierte Gegenstände, hinzufügen per Umschalt-Rechtsklick oder Rechtsklick > Ignorieren",
+    ["Reset Junk"]                       = "Plunder zurücksetzen",
+    ["Reset Normal"]                     = "Normal zurücksetzen",
+    ["Reset All"]                        = "Alle zurücksetzen",
+    ["Reset ignored Junk"]               = "Ignorierten Plunder zurücksetzen",
+    ["Reset ignored Normal"]             = "Ignorierte Normale zurücksetzen",
+    ["Reset the whole ignore list"]      = "Die gesamte Ignorierliste zurücksetzen",
+    -- These three only ever appear after "aus" / "bei", so they are in the dative.
+    ["ignored Junk"]                     = "dem ignorierten Plunder",
+    ["ignored Normal"]                   = "den ignorierten Normalen",
+    ["the whole ignore list"]            = "der gesamten Ignorierliste",
+    ["Shift-click to skip the confirm."] = "Umschalt-Klick überspringt die Abfrage.",
+    ["Remove from ignore list."]         = "Von der Ignorierliste entfernen.",
+
+    -- settings window: Junk tab
+    ["Items you marked as junk that are in your bags - X unmarks them, nothing is deleted"] =
+        "Von dir als Plunder markierte Gegenstände in deinen Taschen. X hebt die Markierung auf, es wird nichts gelöscht",
+    ["No marked junk in your bags."]     = "Kein markierter Plunder in deinen Taschen.",
+    ["Clear all junk"]                   = "Alle Plundermarken aufheben",
+    ["Unmark everything you marked as junk"] = "Alle deine Plundermarkierungen aufheben",
+    ["Unmark as junk. Shift-click to skip the confirm."] =
+        "Plundermarkierung aufheben. Umschalt-Klick überspringt die Abfrage.",
+
+    -- settings window: Settings tab
+    ["Loot-assist"]                      = "Beute-Assistent",
+    ["Shift-click a loot item with full bags to choose what to delete, then loot it"] =
+        "Umschalt-Klick auf Beute bei vollen Taschen: erst wählen, was gelöscht wird, dann wird geplündert",
+    ["Colour loot rows"]                 = "Beutezeilen einfärben",
+    ["Tints the loot window green (worth more than the cheapest thing you would delete) or red (skip it), only while your bags are full"] =
+        "Färbt das Beutefenster grün (mehr wert als das Günstigste, was du löschen würdest) oder rot (liegen lassen), nur bei vollen Taschen",
+    ["Suggest by AH prices"]             = "Nach AH-Preisen vorschlagen",
+    ["Rank by Auctionator AH value instead of vendor (falls back to vendor)"] =
+        "Nach Auctionator-AH-Wert statt Händlerpreis bewerten (fällt auf den Händlerpreis zurück)",
+    ["Requires Auctionator (not installed / not detected) - ranking uses vendor prices"] =
+        "Benötigt Auctionator (nicht installiert / nicht erkannt), die Bewertung nutzt Händlerpreise",
+    ["Show item frames"]                 = "Gegenstandsfenster anzeigen",
+    ["Master toggle - same as left-clicking the minimap icon"] =
+        "Hauptschalter, wie ein Linksklick auf das Minikartensymbol",
+    ["Always show item frames"]          = "Gegenstandsfenster immer anzeigen",
+    ["Keep the icons visible even when there is nothing to delete"] =
+        "Die Symbole sichtbar lassen, auch wenn es nichts zu löschen gibt",
+    ["Show minimap icon"]                = "Minikartensymbol anzeigen",
+    ["Minimap button: left-click show/hide frames, right-click settings"] =
+        "Minikartenknopf: Linksklick blendet die Fenster ein/aus, Rechtsklick öffnet die Einstellungen",
+    ["Auto-sell marked items at vendors"] = "Markierte Gegenstände beim Händler automatisch verkaufen",
+    ["Sells only items YOU marked as junk and only above gray quality - grays are left to sell-all-junk"] =
+        "Verkauft nur Gegenstände, die DU als Plunder markiert hast, und nur oberhalb grauer Qualität. Graue bleiben dem Plunderverkauf überlassen",
+    ["Reset icon position"]              = "Symbolposition zurücksetzen",
+    ["Frame scale: %d%%"]                = "Fenstergröße: %d%%",
+
+    -- settings window: language picker ("Deutsch" is deliberately not a key -
+    -- a language is named in its own language in every locale)
+    ["Language"]                         = "Sprache",
+    ["Language: %s"]                     = "Sprache: %s",
+    ["Automatic (game language)"]        = "Automatisch (Spielsprache)",
+    ["English"]                          = "Englisch",
+    ["Addon language"]                   = "Sprache des Addons",
+    ["Automatic follows the game's language. Pick English or Deutsch to override it, whatever the client is set to. Changing it asks first, then reloads your interface."] =
+        "Automatisch folgt der Sprache des Spiels. Wähle Englisch oder Deutsch, um sie unabhängig davon festzulegen. Eine Änderung fragt nach und lädt dann deine Benutzeroberfläche neu.",
+    ["The game's own language is used unless you override it here."] =
+        "Es wird die Sprache des Spiels verwendet, solange du sie hier nicht überschreibst.",
+    ["Type /reload to apply the new language."] =
+        "Gib /reload ein, um die neue Sprache zu übernehmen.",
+    ["Switch the addon language to %s?"] = "Sprache des Addons auf %s umstellen?",
+    ["Your interface will be reloaded."] = "Deine Benutzeroberfläche wird neu geladen.",
+    ["Reload now"]                       = "Jetzt neu laden",
+    ["not while you are in combat - try again afterwards."] =
+        "nicht im Kampf, versuch es danach erneut.",
+
+    -- settings window: profiles
+    ["Character profile"]                = "Charakterprofil",
+    ["Default"]                          = "Standard",
+    ["Default (shared)"]                 = "Standard (geteilt)",
+    ["Profile: %s"]                      = "Profil: %s",
+    ["This character uses: %s"]          = "Dieser Charakter nutzt: %s",
+    ["shared list"]                      = "geteilte Liste",
+    ["own list"]                         = "eigene Liste",
+    ["Switch profile"]                   = "Profil wechseln",
+    ["Default is shared by every character on it; the character profile is private. Both always exist, switching never deletes either."] =
+        "Standard wird von jedem Charakter geteilt, der es nutzt; das Charakterprofil ist privat. Beide existieren immer, ein Wechsel löscht keines von beiden.",
+    ["Copy from Default"]                = "Von Standard kopieren",
+    ["Copy to Default"]                  = "Nach Standard kopieren",
+    ["Pull Default into this character"] = "Standard in diesen Charakter holen",
+    ["Push this character into Default"] = "Diesen Charakter nach Standard schreiben",
+    ["Overwrites this character's ignore list + junk marks. Shift-click skips confirm."] =
+        "Überschreibt Ignorierliste und Plundermarkierungen dieses Charakters. Umschalt-Klick überspringt die Abfrage.",
+    ["Overwrites the shared Default list for every character on it. Shift-click skips confirm."] =
+        "Überschreibt die geteilte Standardliste für jeden Charakter, der sie nutzt. Umschalt-Klick überspringt die Abfrage.",
+    ["replace this character's list with a copy of Default"] =
+        "die Liste dieses Charakters durch eine Kopie von Standard ersetzen",
+    ["overwrite Default with this character's list"] =
+        "Standard mit der Liste dieses Charakters überschreiben",
+    ["copied %s into this character's profile."] = "%s in das Profil dieses Charakters kopiert.",
+    ["copied this character's profile into %s."] = "Profil dieses Charakters nach %s kopiert.",
+    ["now using the %s profile."]        = "nutzt jetzt das Profil %s.",
+    ["Profiles scope only the ignore list and junk marks; every setting above is shared across your characters. \"Default\" is the shared list, every character on it sees the same entries."] =
+        "Profile umfassen nur die Ignorierliste und die Plundermarkierungen; jede Einstellung darüber gilt für alle deine Charaktere. \"Standard\" ist die geteilte Liste, jeder Charakter darauf sieht dieselben Einträge.",
+
+    -- settings window: Debug tab
+    ["Open the addon's dialogs on demand, without having to fill your bags first. They use your real items and the real ranking; clicking anything in them does nothing - %s."] =
+        "Öffnet die Dialoge des Addons auf Wunsch, ohne dass du erst deine Taschen füllen musst. Sie nutzen deine echten Gegenstände und die echte Bewertung; ein Klick darin bewirkt nichts, %s.",
+    ["nothing is ever deleted"]          = "es wird nie etwas gelöscht",
+    ["Show comparison dialog"]           = "Vergleichsdialog anzeigen",
+    ["Hide comparison dialog"]           = "Vergleichsdialog ausblenden",
+    ["Full-bags comparison dialog"]      = "Vergleichsdialog bei vollen Taschen",
+    ["Picks a random bag item worth more than your two cheapest, so the \"worth it\" verdict shows. Also available as /dgjunk preview."] =
+        "Wählt einen zufälligen Gegenstand aus deinen Taschen, der mehr wert ist als deine zwei günstigsten, damit das Urteil \"lohnt sich\" erscheint. Auch als /dgjunk preview verfügbar.",
+
+    -- settings window: Log tab
+    ["Debug logging"]                    = "Debug-Logging",
+    ["Record diagnostic messages here (never printed to chat)"] =
+        "Diagnosemeldungen hier aufzeichnen (nie im Chat ausgegeben)",
+    ["Clear"]                            = "Leeren",
+    ["Refresh"]                          = "Aktualisieren",
+    ["(log empty - enable Debug logging)"] = "(Log leer, Debug-Logging aktivieren)",
+
+    -- confirm dialogs
+    ["Really delete this %s item?"]      = "Diesen Gegenstand der Qualität %s wirklich löschen?",
+    ["This cannot be undone."]           = "Das kann nicht rückgängig gemacht werden.",
+    ["This will %s."]                    = "Dies wird %s.",
+    ["Continue?"]                        = "Fortfahren?",
+    ["Remove %d item from %s?"]          = "%d Gegenstand aus %s entfernen?",
+    ["Remove %d items from %s?"]         = "%d Gegenstände aus %s entfernen?",
+    ["Remove %s from the ignore list?"]  = "%s von der Ignorierliste entfernen?",
+    ["nothing to reset for %s"]          = "nichts zurückzusetzen bei %s",
+    ["Unmark %s as junk?"]               = "Markierung von %s als Plunder aufheben?",
+    ["Unmark all %d item marked as junk?"]  = "Markierung von %d Gegenstand aufheben?",
+    ["Unmark all %d items marked as junk?"] = "Markierung von %d Gegenständen aufheben?",
+    ["Your items are not touched, only the marks."] =
+        "Deine Gegenstände bleiben unangetastet, nur die Markierungen.",
+    ["unmarked %d item"]                 = "%d Markierung aufgehoben",
+    ["unmarked %d items"]                = "%d Markierungen aufgehoben",
+    ["nothing marked as junk"]           = "nichts als Plunder markiert",
+    ["shift-click: no confirm"]          = "Umschalt-Klick: ohne Abfrage",
+}
+
+-- The locale is fixed at load time and never changes afterwards: the popup
+-- templates and every frame label below are built once, from L, as this file
+-- runs. DGsJunkDB.locale is a development override set by "/dgjunk lang" and it
+-- therefore needs a /reload to take effect, which is what that command says.
+-- Reading the saved variable here is a best-effort: if it is not populated yet
+-- the client locale wins and the override lands on the next reload.
+local function PickLocale()
+    local saved = type(DGsJunkDB) == "table" and DGsJunkDB.locale or nil
+    return saved or GetLocale()
+end
+
+local activeLocale = PickLocale()
+for k, v in pairs(locales[activeLocale] or {}) do L[k] = v end
+-- Set when the locale had to be re-applied on ADDON_LOADED: the labels built
+-- while this file ran are then still in the previous language, so the picker
+-- keeps asking for a /reload even though L itself is already correct.
+local localeStale = false
 
 local DB                                       -- saved vars (pos + ignore list); set on ADDON_LOADED
 local Update, BuildConfig, RefreshConfig       -- fwd decls
@@ -113,7 +382,7 @@ end
 -- Single bag scan -> cheapest junk item, and cheapest qualifying non-junk item.
 -- A non-junk candidate must have a vendor value (>0), not be excluded, and end
 -- Cheapest junk item and cheapest non-junk item (each shown on its own icon,
--- independently). Non-junk must have vendor value and not be a quest item.
+-- independently). The normal one must have vendor value and not be a quest item.
 local function ScanBags()
     local junk, cheap
     for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
@@ -165,15 +434,22 @@ local function err(where, e)  -- always logged; swallowed post-call errors would
     Log(line)
 end
 
+-- Coin suffixes come from Blizzard's own globals (enUS g/s/c, deDE G/S/K), so
+-- every language is right without a translation entry. GetCoinTextureString is
+-- deliberately not used: it draws coin icons and ignores our colour scheme.
+local GOLD_SUFFIX   = _G.GOLD_AMOUNT_SYMBOL   or "g"
+local SILVER_SUFFIX = _G.SILVER_AMOUNT_SYMBOL or "s"
+local COPPER_SUFFIX = _G.COPPER_AMOUNT_SYMBOL or "c"
+
 local function Coin(c)
-    if not c or c == 0 then return "0c" end
+    if not c or c == 0 then return "0" .. COPPER_SUFFIX end
     local g = math.floor(c / 10000)
     local s = math.floor((c % 10000) / 100)
     local cp = c % 100
     local out = ""
-    if g > 0 then out = out .. "|cffffd700" .. g .. "g|r " end
-    if s > 0 then out = out .. "|cffc7c7cf" .. s .. "s|r " end
-    return out .. "|cffeda55f" .. cp .. "c|r"
+    if g > 0 then out = out .. "|cffffd700" .. g .. GOLD_SUFFIX .. "|r " end
+    if s > 0 then out = out .. "|cffc7c7cf" .. s .. SILVER_SUFFIX .. "|r " end
+    return out .. "|cffeda55f" .. cp .. COPPER_SUFFIX .. "|r"
 end
 
 -- Compact one-line description of a candidate record, so a log entry says which
@@ -201,7 +477,7 @@ end
 -- so it gets our own Yes/No on top of whatever the caller already asked (and on
 -- top of Blizzard's own type-DELETE box, which only appears for non-gray items).
 StaticPopupDialogs["DGSJUNK_CONFIRM_DELETE_RARE"] = {
-    text = "|cffffcc55DGs Junk|r\n\nReally delete this %s item?\n\n%s",
+    text = "|cffffcc55DGs Junk|r\n\n" .. L["Really delete this %s item?"] .. "\n\n%s",
     button1 = YES,
     button2 = NO,
     OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
@@ -217,10 +493,10 @@ local function DeleteRecord(rec, tag, confirmed)
     local link = select(2, GetItemInfo(rec.id or 0))
     local quality = select(3, GetItemInfo(rec.id or 0))
     if not confirmed and quality and quality >= UNCOMMON then
-        local qname = _G["ITEM_QUALITY" .. quality .. "_DESC"] or "rare"
+        local qname = _G["ITEM_QUALITY" .. quality .. "_DESC"] or L["rare"]
         local col = (ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
                      and ITEM_QUALITY_COLORS[quality].hex) or "|cffffffff"
-        local what = (link or "this item") .. ((rec.count or 1) > 1 and (" x" .. rec.count) or "")
+        local what = (link or L["this item"]) .. ((rec.count or 1) > 1 and (" x" .. rec.count) or "")
         act("delete blocked", rec.id, "quality " .. quality .. " - asking to confirm")
         StaticPopup_Show("DGSJUNK_CONFIRM_DELETE_RARE", col .. qname .. "|r", what,
             function() DeleteRecord(rec, tag, true) end)
@@ -229,7 +505,9 @@ local function DeleteRecord(rec, tag, confirmed)
     act("delete", rec.id, (tag or "deleted") .. " bag " .. tostring(rec.bag) .. " slot " .. tostring(rec.slot))
     PickupContainerItem(rec.bag, rec.slot)
     DeleteCursorItem()                                 -- non-gray -> Blizzard raises a confirm popup
-    print(GREEN .. "DGs Junk|r " .. (tag or "deleted") .. " " .. (link or "item"))
+    -- `tag` stays an English key on the act() line above (the log is English by
+    -- design) and is translated only here, where the player reads it.
+    print(GREEN .. "DGs Junk|r " .. L[tag or "deleted"] .. " " .. (link or L["item"]))
 end
 
 local function IgnoreRecord(rec)
@@ -238,7 +516,8 @@ local function IgnoreRecord(rec)
     DB.ignore[rec.id] = rec.junk and "junk" or "normal"
     act("ignore", rec.id, "category=" .. DB.ignore[rec.id])
     local link = select(2, GetItemInfo(rec.id))
-    print(GOLD .. "DGs Junk|r ignoring " .. (link or "item") .. " |cff888888(/dgjunk to manage)|r")
+    print(GOLD .. "DGs Junk|r " .. fmt(L["ignoring %s"], link or L["item"]) ..
+        " |cff888888(" .. L["/dgjunk to manage"] .. ")|r")
 end
 
 local function OpenSettings()
@@ -253,7 +532,7 @@ end
 local legacyMenuFrame
 -- rec may be nil (empty placeholder frame) -> Settings-only menu
 local function OpenMenu(rec, owner)
-    local link = rec and (select(2, GetItemInfo(rec.id)) or "this item")
+    local link = rec and (select(2, GetItemInfo(rec.id)) or L["this item"])
     local marked = rec and IsJunk(rec.id)
     local function doDelete() DeleteRecord(rec, "deleted"); if C_Timer then C_Timer.After(0.15, Update) end end
     local function doIgnore() IgnoreRecord(rec); Update() end
@@ -268,32 +547,32 @@ local function OpenMenu(rec, owner)
             -- Safe actions first, Delete fenced off by dividers so it is never
             -- the neighbour of a harmless click.
             if rec then
-                root:CreateButton("Ignore " .. link, doIgnore)
-                root:CreateButton(marked and "Unmark as junk" or "Mark as junk", marked and doUnmark or doMark)
+                root:CreateButton(fmt(L["Ignore %s"], link), doIgnore)
+                root:CreateButton(marked and L["Unmark as junk"] or L["Mark as junk"], marked and doUnmark or doMark)
                 root:CreateDivider()
-                root:CreateButton("Delete " .. link, doDelete)
+                root:CreateButton(fmt(L["Delete %s"], link), doDelete)
                 root:CreateDivider()
             end
-            root:CreateButton("Settings", OpenSettings)
+            root:CreateButton(L["Settings"], OpenSettings)
         end)
     elseif EasyMenu then                                     -- legacy fallback
         local menu = { { text = "DGs Junk", isTitle = true, notCheckable = true } }
         if rec then
-            menu[#menu + 1] = { text = "Ignore " .. link, notCheckable = true, func = doIgnore }
-            menu[#menu + 1] = { text = marked and "Unmark as junk" or "Mark as junk",
+            menu[#menu + 1] = { text = fmt(L["Ignore %s"], link), notCheckable = true, func = doIgnore }
+            menu[#menu + 1] = { text = marked and L["Unmark as junk"] or L["Mark as junk"],
                                 notCheckable = true, func = marked and doUnmark or doMark }
             menu[#menu + 1] = { text = "", notCheckable = true, disabled = true }   -- divider
-            menu[#menu + 1] = { text = "Delete " .. link, notCheckable = true, func = doDelete }
+            menu[#menu + 1] = { text = fmt(L["Delete %s"], link), notCheckable = true, func = doDelete }
             menu[#menu + 1] = { text = "", notCheckable = true, disabled = true }   -- divider
         end
-        menu[#menu + 1] = { text = "Settings", notCheckable = true, func = OpenSettings }
-        menu[#menu + 1] = { text = "Cancel", notCheckable = true, func = function() end }
+        menu[#menu + 1] = { text = L["Settings"], notCheckable = true, func = OpenSettings }
+        menu[#menu + 1] = { text = CANCEL or L["Cancel"], notCheckable = true, func = function() end }
         if not legacyMenuFrame then
             legacyMenuFrame = CreateFrame("Frame", "DGsJunkContextMenu", UIParent, "UIDropDownMenuTemplate")
         end
         EasyMenu(menu, legacyMenuFrame, "cursor", 0, 0, "MENU")
     else
-        print(GOLD .. "DGs Junk|r no menu API; use shift-left = delete, shift-right = ignore, /dgjunk = settings")
+        print(GOLD .. "DGs Junk|r " .. L["no menu API; use shift-left = delete, shift-right = ignore, /dgjunk = settings"])
     end
 end
 
@@ -345,13 +624,13 @@ local function MakeIcon(name, borderColor, labelText, labelColor)
         if self.rec then
             GameTooltip:SetItemByID(self.rec.id)
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff33ff99Shift-left-click|r|cff888888 delete|r")
-            GameTooltip:AddLine("|cffff8800Shift-right-click|r|cff888888 ignore|r")
-            GameTooltip:AddLine("|cffffcc55Right-click|r|cff888888 for menu (delete / ignore / settings)|r")
+            GameTooltip:AddLine("|cff33ff99" .. L["Shift-left-click"] .. "|r|cff888888 " .. L["delete"] .. "|r")
+            GameTooltip:AddLine("|cffff8800" .. L["Shift-right-click"] .. "|r|cff888888 " .. L["ignore"] .. "|r")
+            GameTooltip:AddLine("|cffffcc55" .. L["Right-click"] .. "|r|cff888888 " .. L["for menu (delete / ignore / settings)"] .. "|r")
         else
             GameTooltip:AddLine("DGs Junk")
-            GameTooltip:AddLine("|cff888888Nothing to clear right now.|r")
-            GameTooltip:AddLine("|cffffcc55Right-click|r|cff888888 for settings|r")
+            GameTooltip:AddLine("|cff888888" .. L["Nothing to clear right now."] .. "|r")
+            GameTooltip:AddLine("|cffffcc55" .. L["Right-click"] .. "|r|cff888888 " .. L["for settings"] .. "|r")
         end
         GameTooltip:Show()
     end)
@@ -399,15 +678,17 @@ local function MakeIcon(name, borderColor, labelText, labelColor)
         self.count:SetText(rec.count > 1 and rec.count or "")
         self.vendor:SetText(Coin((rec.each or 0) * rec.count))
         local ah = AHPrice(rec.id)
-        self.ah:SetText(ah and ("AH " .. Coin(ah)) or GREY .. "AH --|r")
+        self.ah:SetText(ah and (L["AH"] .. " " .. Coin(ah)) or GREY .. L["AH"] .. " --|r")
         self:Show()
     end
 
     return b
 end
 
-local junkIcon  = MakeIcon("Junk",  {0.55, 0.55, 0.55}, "Junk",  GREY)
-local cheapIcon = MakeIcon("Cheap", {0.90, 0.55, 0.15}, "Cheap!", GOLD)
+-- First argument is the FRAME name (DGsJunk_Junk / DGsJunk_Cheap) and must stay
+-- English; only the visible label is translated.
+local junkIcon  = MakeIcon("Junk",  {0.55, 0.55, 0.55}, L["Junk"],  GREY)
+local cheapIcon = MakeIcon("Cheap", {0.90, 0.55, 0.15}, L["Normal"], GOLD)
 
 -- A small grip handle to the left is the mover (icons themselves aren't draggable,
 -- so clicks never get mistaken for drags). The cheap icon rides to the right.
@@ -441,8 +722,8 @@ drag:SetScript("OnEnter", function(self)
     if dragging then return end
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("DGs Junk")
-    GameTooltip:AddLine("|cff888888Drag to move|r")
-    GameTooltip:AddLine("|cffffcc55Right-click|r|cff888888 for menu|r")
+    GameTooltip:AddLine("|cff888888" .. L["Drag to move"] .. "|r")
+    GameTooltip:AddLine("|cffffcc55" .. L["Right-click"] .. "|r|cff888888 " .. L["for menu"] .. "|r")
     GameTooltip:Show()
 end)
 drag:SetScript("OnLeave", GameTooltip_Hide)
@@ -510,9 +791,9 @@ local function BuildMinimapButton()
         if dragging then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("DGs Junk")
-        GameTooltip:AddLine("|cff888888Left-click:|r show/hide frames")
-        GameTooltip:AddLine("|cff888888Right-click:|r settings")
-        GameTooltip:AddLine("|cff888888Drag:|r move around minimap")
+        GameTooltip:AddLine("|cff888888" .. L["Left-click:"] .. "|r " .. L["show/hide frames"])
+        GameTooltip:AddLine("|cff888888" .. L["Right-click:"] .. "|r " .. L["settings"])
+        GameTooltip:AddLine("|cff888888" .. L["Drag:"] .. "|r " .. L["move around minimap"])
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", GameTooltip_Hide)
@@ -688,7 +969,7 @@ local function AutoSellMarked()
         end
     end
     if sold > 0 then
-        print("|cffffd200DGs Junk|r sold " .. sold .. " marked item(s) for " .. Coin(value) .. ".")
+        print("|cffffd200DGs Junk|r " .. fmt(L["sold %d marked item(s) for %s."], sold, Coin(value)))
         dbg("autosell: " .. sold .. " stacks, " .. value .. "c")
         if C_Timer then C_Timer.After(delay + 0.3, Update) end
     end
@@ -787,17 +1068,17 @@ local function AddVerdict(tip, id)
     -- decision that is not yours to make.
     if LootSlotLocked(tipSlot) then
         dbg("loot slot", tipSlot, "locked - roll in progress or not eligible")
-        tip:AddLine(GREY .. "Being rolled for - not yours to take yet|r")
+        tip:AddLine(GREY .. L["Being rolled for - not yours to take yet"] .. "|r")
         return tip:Show()
     end
     if IsQuestItem(id) then                            -- always worth taking, never compared on value
         dbg("quest item", id, "- take it")
-        tip:AddLine(GREEN .. "Quest item: Take it!|r")
+        tip:AddLine(GREEN .. L["Quest item: Take it!"] .. "|r")
         return tip:Show()
     end
     if StackRoom(id) > 0 then                          -- stacks onto what you carry: free
         dbg("stackable", id, "- room in an existing stack")
-        tip:AddLine(GREEN .. "Loot it|r " .. GREY .. "(stacks, costs no bag slot)|r")
+        tip:AddLine(GREEN .. L["Loot it"] .. "|r " .. GREY .. "(" .. L["stacks, costs no bag slot"] .. ")|r")
         return tip:Show()
     end
 
@@ -814,15 +1095,15 @@ local function AddVerdict(tip, id)
         "other=" .. (other and (other.id .. "@" .. (other.value or 0) .. " x" .. (other.count or 1)) or "none"))
 
     if #worths == 0 then
-        tip:AddLine(GREY .. "Nothing to clear a slot|r")
+        tip:AddLine(GREY .. L["Nothing to clear a slot"] .. "|r")
     else
         -- Only the cheapest candidate matters: it is the one the dialog
         -- recommends, so that is what looting this item would actually cost.
         local lo = math.min(unpack(worths))
         if hoverWorth > lo then
-            tip:AddLine(GREEN .. "Loot it|r " .. GREY .. "(cheapest to discard " .. Coin(lo) .. ")|r")
+            tip:AddLine(GREEN .. L["Loot it"] .. "|r " .. GREY .. "(" .. fmt(L["cheapest to discard %s"], Coin(lo)) .. ")|r")
         else
-            tip:AddLine(RED .. "Skip|r " .. GREY .. "(cheapest to discard " .. Coin(lo) .. ")|r")
+            tip:AddLine(RED .. L["Skip"] .. "|r " .. GREY .. "(" .. fmt(L["cheapest to discard %s"], Coin(lo)) .. ")|r")
         end
     end
     tip:Show()
@@ -860,8 +1141,9 @@ else
 end
 
 ------------------------------------------------ loot assist (shift-click)
--- Shift-click a loot item with full bags -> delete cheapest GRAY junk (instant,
--- no confirm popup) and re-loot the slot. Hooks LootSlot so it is UI-agnostic.
+-- Shift-click a loot item with full bags -> open the comparison dialog with the
+-- deletable candidates. Picking one there deletes it and re-loots the slot; the
+-- dialog IS the confirm, so nothing is destroyed on the shift-click itself.
 -- Toggle in the Settings tab.
 local function BagsFull()
     for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
@@ -960,7 +1242,7 @@ local function DoLootClear(rec, slot)
         or (slot and GetLootSlotLink and not GetLootSlotLink(slot))
     if gone then
         dbg("loot-clear aborted: loot slot", slot, "no longer available")
-        print(GOLD .. "DGs Junk|r loot is gone - nothing deleted.")
+        print(GOLD .. "DGs Junk|r " .. L["loot is gone - nothing deleted."])
         return
     end
     DeleteRecord(rec, "cleared for loot:")
@@ -1002,7 +1284,7 @@ local function BuildConfirm()
 
     local head = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     head:SetPoint("TOP", 0, -26)
-    head:SetText("Bags full - click a junk/item to delete and loot:")
+    head:SetText(L["Bags full - click a junk/item to delete and loot:"])
     f.head = head
     -- Preview banner: hidden in normal use, so the live dialog is unchanged.
     local banner = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1090,11 +1372,11 @@ local function BuildConfirm()
         -- everywhere: what a click does is never a thing you have to discover.
         if hints and self.rec then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff33ff99Left-click|r|cff888888 delete this and loot|r")
-            GameTooltip:AddLine("|cffff8800Shift-right-click|r|cff888888 ignore|r")
-            GameTooltip:AddLine("|cffffcc55Right-click|r|cff888888 for menu|r")
+            GameTooltip:AddLine("|cff33ff99" .. L["Left-click"] .. "|r|cff888888 " .. L["delete this and loot"] .. "|r")
+            GameTooltip:AddLine("|cffff8800" .. L["Shift-right-click"] .. "|r|cff888888 " .. L["ignore"] .. "|r")
+            GameTooltip:AddLine("|cffffcc55" .. L["Right-click"] .. "|r|cff888888 " .. L["for menu"] .. "|r")
             if #listFor(self.which) > 1 then
-                GameTooltip:AddLine("|cff888888Arrows / mouse wheel:|r pick another item")
+                GameTooltip:AddLine("|cff888888" .. L["Arrows / mouse wheel:"] .. "|r " .. L["pick another item"])
             end
         end
         GameTooltip:Show()
@@ -1104,17 +1386,17 @@ local function BuildConfirm()
     -- Ignore. Delete already has the left-click, and offering it twice - once as
     -- a click, once in a menu - is how an irreversible action gets hit by accident.
     local function IgnoreMenu(rec, owner)
-        local link = select(2, GetItemInfo(rec.id)) or "this item"
+        local link = select(2, GetItemInfo(rec.id)) or L["this item"]
         local function doIgnore() f.IgnoreCandidate(rec) end
         if MenuUtil and MenuUtil.CreateContextMenu then
             MenuUtil.CreateContextMenu(owner or UIParent, function(_, root)
                 root:CreateTitle("DGs Junk")
-                root:CreateButton("Ignore " .. link, doIgnore)
+                root:CreateButton(fmt(L["Ignore %s"], link), doIgnore)
             end)
         elseif EasyMenu then
             legacyMenuFrame = legacyMenuFrame or CreateFrame("Frame", "DGsJunkConfirmMenu", UIParent, "UIDropDownMenuTemplate")
             EasyMenu({ { text = "DGs Junk", isTitle = true, notCheckable = true },
-                       { text = "Ignore " .. link, notCheckable = true, func = doIgnore } },
+                       { text = fmt(L["Ignore %s"], link), notCheckable = true, func = doIgnore } },
                      legacyMenuFrame, "cursor", 0, 0, "MENU")
         else
             doIgnore()          -- no menu API at all: do the only thing the menu offers
@@ -1128,7 +1410,7 @@ local function BuildConfirm()
     f.IgnoreCandidate = function(rec)
         if not rec then return end
         if f.preview then
-            print(GOLD .. "DGs Junk|r preview mode - nothing was ignored.")
+            print(GOLD .. "DGs Junk|r " .. L["preview mode - nothing was ignored."])
             dbg("preview: ignore suppressed for item " .. tostring(rec.id))
             return
         end
@@ -1136,14 +1418,14 @@ local function BuildConfirm()
         Update()                   -- rebuilds the icons, the settings lists AND this dialog
     end
 
-    f.lootBtn = Slot("|cff33ff99Loot|r", 40)
+    f.lootBtn = Slot("|cff33ff99" .. L["Loot"] .. "|r", 40)
     f.lootBtn:SetScript("OnEnter", hover("ANCHOR_LEFT"))
     f.lootBtn:SetScript("OnLeave", GameTooltip_Hide)
     local arrow = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     arrow:SetPoint("LEFT", f.lootBtn, "RIGHT", 26, 0); arrow:SetText("|cffaaaaaa>|r")
 
-    f.junkBtn  = Slot("|cffcfcfcfJunk|r", 220)
-    f.otherBtn = Slot("|cffffcc55Non-junk|r", 320)
+    f.junkBtn  = Slot("|cffcfcfcf" .. L["Junk"] .. "|r", 220)
+    f.otherBtn = Slot("|cffffcc55" .. L["Normal"] .. "|r", 320)
     f.junkBtn.which, f.otherBtn.which = "junk", "other"
     Pager(f.junkBtn,  "junk")
     Pager(f.otherBtn, "other")
@@ -1164,7 +1446,7 @@ local function BuildConfirm()
                 return
             end
             if f.preview then
-                print(GOLD .. "DGs Junk|r preview mode - nothing was deleted.")
+                print(GOLD .. "DGs Junk|r " .. L["preview mode - nothing was deleted."])
                 dbg("preview: click on", self.which, "ignored -", RecTag(self.rec))
                 return                                   -- dialog stays open so you can keep poking at it
             end
@@ -1178,7 +1460,7 @@ local function BuildConfirm()
             if GetContainerItemID(self.rec.bag, self.rec.slot) ~= self.rec.id then
                 dbg("clear aborted: bag " .. tostring(self.rec.bag) .. " slot " ..
                     tostring(self.rec.slot) .. " no longer holds item " .. tostring(self.rec.id))
-                print(GOLD .. "DGs Junk|r your bags changed - nothing deleted, pick again.")
+                print(GOLD .. "DGs Junk|r " .. L["your bags changed - nothing deleted, pick again."])
                 if f.SyncLists then f.SyncLists() end
                 return
             end
@@ -1187,7 +1469,7 @@ local function BuildConfirm()
     end
 
     local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(120, 24); cancel:SetPoint("BOTTOM", 0, 12); cancel:SetText(CANCEL or "Cancel")
+    cancel:SetSize(120, 24); cancel:SetPoint("BOTTOM", 0, 12); cancel:SetText(CANCEL or L["Cancel"])
     cancel:SetScript("OnClick", function() f:Hide() end)
 
     -- Both slots are ALWAYS drawn. An empty one showing nothing at all reads as a
@@ -1209,7 +1491,7 @@ local function BuildConfirm()
         local n, _, _, _, _, _, _, _, _, tex = GetItemInfo(rec.id)
         b.rec = rec; b.itemID = rec.id; b.link = nil
         b.icon:SetTexture(tex)
-        b.name:SetText(n or ("item " .. rec.id))
+        b.name:SetText(n or fmt(L["item %d"], rec.id))
         -- Total first, stack size after it ("3c (x3)"): the recommendation compares
         -- total stack value, so the total has to be the number you actually see.
         -- Both rows are stack totals, so vendor and AH are directly comparable.
@@ -1220,7 +1502,7 @@ local function BuildConfirm()
         b.price:SetText("|cffffffff" .. Coin((rec.each or 0) * cnt) .. "|r" ..
             " " .. GREY .. "(x" .. cnt .. ")|r")
         local ahEach = AHPrice(rec.id)
-        b.ah:SetText((ahEach and ahEach > 0) and (GREY .. "AH:|r " .. Coin(ahEach * cnt)) or "")
+        b.ah:SetText((ahEach and ahEach > 0) and (GREY .. L["AH:"] .. "|r " .. Coin(ahEach * cnt)) or "")
         b.tag:SetText("")
         b.SetBorder(0.3, 0.3, 0.3)
     end
@@ -1237,12 +1519,12 @@ local function BuildConfirm()
 
     f.RenderCandidates = function()
         local jl, ol = listFor("junk"), listFor("other")
-        fill(f.junkBtn,  jl[idxFor("junk")],  "no junk")
-        fill(f.otherBtn, ol[idxFor("other")], "no other item")
+        fill(f.junkBtn,  jl[idxFor("junk")],  L["no junk"])
+        fill(f.otherBtn, ol[idxFor("other")], L["no normal item"])
         pager(f.junkBtn, "junk"); pager(f.otherBtn, "other")
         -- the paging hint is noise when there is nothing to page through
         f.banner:SetText((#jl > 1 or #ol > 1)
-            and (GREY .. "Arrows or mouse wheel over an icon: pick a different item|r") or "")
+            and (GREY .. L["Arrows or mouse wheel over an icon: pick a different item"] .. "|r") or "")
 
         -- The recommendation still means "the cheapest thing you could destroy",
         -- so it is anchored to the head of each list, never to whatever you have
@@ -1257,10 +1539,10 @@ local function BuildConfirm()
                 if f.lworth and rec.value >= f.lworth then
                     -- paged up past the point where the trade pays off
                     b.SetBorder(0.85, 0.15, 0.15)
-                    b.tag:SetText(RED .. "costs more than the loot|r")
+                    b.tag:SetText(RED .. L["costs more than the loot"] .. "|r")
                 elseif b == best and rec == ((b == f.junkBtn) and jl[1] or ol[1]) then
                     b.SetBorder(0.1, 0.85, 0.2)
-                    b.tag:SetText(GREEN .. "recommended|r")
+                    b.tag:SetText(GREEN .. L["recommended"] .. "|r")
                 end
             end
         end
@@ -1272,14 +1554,14 @@ local function BuildConfirm()
         local lo = math.min(rj, ro)
         if f.lid and IsQuestItem(f.lid) then
             f.lootBtn.SetBorder(0.1, 0.85, 0.2)
-            f.lootBtn.tag:SetText(GREEN .. "quest - take it|r")
+            f.lootBtn.tag:SetText(GREEN .. L["quest - take it"] .. "|r")
         elseif f.lworth and lo < math.huge then
             if f.lworth > lo then
                 f.lootBtn.SetBorder(0.1, 0.85, 0.2)
-                f.lootBtn.tag:SetText(GREEN .. "worth it|r")
+                f.lootBtn.tag:SetText(GREEN .. L["worth it"] .. "|r")
             else
                 f.lootBtn.SetBorder(0.85, 0.15, 0.15)
-                f.lootBtn.tag:SetText(RED .. "not worth it|r")
+                f.lootBtn.tag:SetText(RED .. L["not worth it"] .. "|r")
             end
         else
             f.lootBtn.SetBorder(0.3, 0.3, 0.3)
@@ -1361,8 +1643,8 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
     -- only place that says so is a chat line when you click something, which no
     -- screenshot of the dialog will contain.
     f:SetHeight(250)
-    f.head:SetText("Bags full - click a junk/item to delete and loot:")
-    f.banner:SetText(GREY .. "Arrows or mouse wheel over an icon: pick a different item|r")
+    f.head:SetText(L["Bags full - click a junk/item to delete and loot:"])
+    f.banner:SetText(GREY .. L["Arrows or mouse wheel over an icon: pick a different item"] .. "|r")
     f.banner:Show()
 
     local lname, _, _, _, _, _, _, _, _, ltex = GetItemInfo(lootLink)
@@ -1393,7 +1675,7 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
         " " .. GREY .. "(x" .. lcount .. ")|r")
     local lahEach = lid and AHPrice(lid)
     local lah = lahEach and (lahEach * lcount)
-    f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. "AH:|r " .. Coin(lah)) or "")
+    f.lootBtn.ah:SetText((lah and lah > 0) and (GREY .. L["AH:"] .. "|r " .. Coin(lah)) or "")
 
     -- Callers that have the ranked lists pass them; the single records stay the
     -- fallback, so a one-item list behaves exactly as before (arrows hidden).
@@ -1442,11 +1724,11 @@ local function PreviewLootConfirm()
     local junkRec, otherRec, junkList, otherList = LootClearCandidates()
     local all = PreviewRecords()
     if #all == 0 then
-        print(GOLD .. "DGs Junk|r preview: no usable items in your bags.")
+        print(GOLD .. "DGs Junk|r " .. L["preview: no usable items in your bags."])
         return
     end
     -- No substitutes for missing candidates: an empty slot now renders as
-    -- "no junk" / "no other item", which IS what the live dialog does, so the
+    -- "no junk" / "no normal item", which IS what the live dialog does, so the
     -- preview shows it rather than inventing a record to fill the gap.
     if not junkRec then dbg("preview: no junk candidate - the slot renders empty") end
     if not otherRec then dbg("preview: no non-junk candidate - the slot renders empty") end
@@ -1513,7 +1795,7 @@ local function LootAssistClick(self)
     -- give, so say why and stop.
     if LootSlotLocked(slot) then
         dbg("loot-assist: slot", slot, "locked - roll in progress or not eligible, no dialog")
-        print(GOLD .. "DGs Junk|r that item is still being rolled for - nothing to clear yet.")
+        print(GOLD .. "DGs Junk|r " .. L["that item is still being rolled for - nothing to clear yet."])
         return
     end
     -- Logged from here on: every earlier return is "not our business at all"
@@ -1530,7 +1812,7 @@ local function LootAssistClick(self)
     end
     local junkRec, otherRec, junkList, otherList = LootClearCandidates()
     if not junkRec and not otherRec then dbg("loot-assist: bags full, nothing deletable to clear"); return end
-    local lootLink = (GetLootSlotLink and GetLootSlotLink(slot)) or "this item"
+    local lootLink = (GetLootSlotLink and GetLootSlotLink(slot)) or L["this item"]
     dbg("loot-assist: slot", slot, "item", tostring(lid),
         "| junk=" .. RecTag(junkRec), "| other=" .. RecTag(otherRec))
     -- the pick-an-item dialog IS the confirm (choose which to delete, or Cancel)
@@ -1714,7 +1996,8 @@ local function ProfileCopyFromMain()
     CopyLists(DB.profiles.Main, DB.profiles[k])
     act("profile copy", nil, "Default -> " .. k)
     AfterProfileSwitch()
-    print(GOLD .. "DGs Junk|r copied |cffffffffDefault|r into this character's profile.")
+    print(GOLD .. "DGs Junk|r " ..
+        fmt(L["copied %s into this character's profile."], "|cffffffff" .. L["Default"] .. "|r"))
 end
 
 -- This character -> Default. Stays on the character profile afterwards.
@@ -1723,7 +2006,8 @@ local function ProfileCopyToMain()
     CopyLists(DB.profiles[k], DB.profiles.Main)
     act("profile copy", nil, k .. " -> Default")
     AfterProfileSwitch()
-    print(GOLD .. "DGs Junk|r copied this character's profile into |cffffffffDefault|r.")
+    print(GOLD .. "DGs Junk|r " ..
+        fmt(L["copied this character's profile into %s."], "|cffffffff" .. L["Default"] .. "|r"))
 end
 
 -- Bind this character to a profile by name ("Main" or its own key).
@@ -1732,14 +2016,28 @@ local function ProfileSwitchTo(name)
     DB.chars[k] = (name == "Main") and "Main" or k
     act("profile switch", nil, "now on " .. DB.chars[k])
     AfterProfileSwitch()
-    print(GOLD .. "DGs Junk|r now using the " ..
-        (name == "Main" and "|cffffffffDefault|r" or "|cffffffff" .. (UnitName("player") or k) .. "|r") .. " profile.")
+    print(GOLD .. "DGs Junk|r " .. fmt(L["now using the %s profile."],
+        (name == "Main" and "|cffffffff" .. L["Default"] .. "|r"
+                        or "|cffffffff" .. (UnitName("player") or k) .. "|r")))
 end
 
 StaticPopupDialogs["DGSJUNK_PROFILE_ACTION"] = {
-    text = "|cffffcc55DGs Junk|r\n\nThis will %s.\n\nContinue?",
+    text = "|cffffcc55DGs Junk|r\n\n" .. L["This will %s."] .. "\n\n" .. L["Continue?"],
     button1 = YES,
     button2 = NO,
+    OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
+    timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
+}
+
+-- A language change cannot be applied live, so the picker offers to do the
+-- reload for us. Reloading is the player's call and never a side effect of
+-- clicking a dropdown entry: nothing is stored until this is accepted, so
+-- cancelling leaves the setting exactly as it was.
+StaticPopupDialogs["DGSJUNK_CONFIRM_LANG"] = {
+    text = "|cffffcc55DGs Junk|r\n\n" .. L["Switch the addon language to %s?"] .. "\n\n" ..
+           L["Your interface will be reloaded."],
+    button1 = L["Reload now"],
+    button2 = CANCEL,
     OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
     timeout = 0, whileDead = true, hideOnEscape = true, showAlert = true, preferredIndex = 3,
 }
@@ -1799,6 +2097,19 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         DGsJunkDB = DGsJunkDB or {}
         DB = DGsJunkDB
         DB.log = DB.log or {}
+        -- SavedVariables are not reliably populated while this file's chunk runs,
+        -- so PickLocale() may have missed a stored override. Re-apply it now that
+        -- DB definitely exists: everything built lazily from here on (the settings
+        -- window, the comparison dialog) comes out in the right language straight
+        -- away, and only the few labels built at file scope stay behind until the
+        -- /reload the picker asks for. Without this the override would need two
+        -- reloads to show up, which reads as "the setting does not work".
+        if (DB.locale or GetLocale()) ~= activeLocale then
+            activeLocale = DB.locale or GetLocale()
+            for k in pairs(L) do L[k] = nil end          -- raw keys only; the fallback lives on the metatable
+            for k, v in pairs(locales[activeLocale] or {}) do L[k] = v end
+            localeStale = true                            -- file-scope labels are still in the old language
+        end
         -- Profiles scope only the DATA (ignore list + junk marks). Settings stay
         -- flat on DB and are therefore account-wide ("Main Settings"), shared by
         -- every character regardless of which data profile it uses.
@@ -1836,7 +2147,7 @@ end)
 -------------------------------------------------------------- settings menu
 local function ItemName(id)
     local name, link, quality = GetItemInfo(id)
-    if not name then return "|cff999999Item #" .. id .. "|r", nil end
+    if not name then return "|cff999999" .. fmt(L["Item #%d"], id) .. "|r", nil end
     local hex = (ITEM_QUALITY_COLORS[quality or 0] or {}).hex or "|cffffffff"
     return hex .. name .. "|r", select(10, GetItemInfo(id))
 end
@@ -1859,7 +2170,7 @@ end
 
 -- Reset buttons are destructive -> always confirm first.
 StaticPopupDialogs["DGSJUNK_CONFIRM_RESET"] = {
-    text = "|cffffcc55DGs Junk|r\n\n%s\n\nThis cannot be undone.",
+    text = "|cffffcc55DGs Junk|r\n\n%s\n\n" .. L["This cannot be undone."],
     button1 = YES,
     button2 = NO,
     OnAccept = function(self)
@@ -1882,11 +2193,13 @@ end
 local function ConfirmReset(category, label)
     local n = CountIgnores(category ~= "all" and category or nil)
     if n == 0 then
-        print(GOLD .. "DGs Junk|r nothing to reset for " .. label)
+        print(GOLD .. "DGs Junk|r " .. fmt(L["nothing to reset for %s"], label))
         return
     end
+    -- Singular and plural are separate keys rather than an "s" glued on: German
+    -- inflects the noun, not just its ending.
     StaticPopup_Show("DGSJUNK_CONFIRM_RESET",
-        "Remove " .. n .. " item" .. (n == 1 and "" or "s") .. " from " .. label .. "?",
+        fmt(n == 1 and L["Remove %d item from %s?"] or L["Remove %d items from %s?"], n, label),
         nil, category)
 end
 
@@ -1917,7 +2230,7 @@ end
 
 -- The Junk tab only edits the mark list; it never touches the bags.
 StaticPopupDialogs["DGSJUNK_CONFIRM_UNMARK"] = {
-    text = "|cffffcc55DGs Junk|r\n\nUnmark %s as junk?",
+    text = "|cffffcc55DGs Junk|r\n\n" .. L["Unmark %s as junk?"],
     button1 = YES,
     button2 = NO,
     OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
@@ -1925,7 +2238,7 @@ StaticPopupDialogs["DGSJUNK_CONFIRM_UNMARK"] = {
 }
 
 StaticPopupDialogs["DGSJUNK_CONFIRM_UNMARK_ALL"] = {
-    text = "|cffffcc55DGs Junk|r\n\n%s\n\nYour items are not touched, only the marks.",
+    text = "|cffffcc55DGs Junk|r\n\n%s\n\n" .. L["Your items are not touched, only the marks."],
     button1 = YES,
     button2 = NO,
     OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
@@ -1943,7 +2256,7 @@ local function ClearAllMarks()
     act("clear all junk", nil, n .. " unmarked")
     if RefreshJunkList then RefreshJunkList() end
     Update()
-    print(GREEN .. "DGs Junk|r unmarked " .. n .. " item" .. (n == 1 and "" or "s"))
+    print(GREEN .. "DGs Junk|r " .. fmt(n == 1 and L["unmarked %d item"] or L["unmarked %d items"], n))
 end
 
 local function CountMarks()
@@ -1956,14 +2269,15 @@ end
 
 local function ConfirmClearAll()
     local n = CountMarks()
-    if n == 0 then print(GOLD .. "DGs Junk|r nothing marked as junk"); return end
+    if n == 0 then print(GOLD .. "DGs Junk|r " .. L["nothing marked as junk"]); return end
     StaticPopup_Show("DGSJUNK_CONFIRM_UNMARK_ALL",
-        "Unmark all " .. n .. " item" .. (n == 1 and "" or "s") .. " marked as junk?",
+        fmt(n == 1 and L["Unmark all %d item marked as junk?"]
+                    or L["Unmark all %d items marked as junk?"], n),
         nil, ClearAllMarks)
 end
 
 StaticPopupDialogs["DGSJUNK_CONFIRM_UNIGNORE"] = {
-    text = "|cffffcc55DGs Junk|r\n\nRemove %s from the ignore list?",
+    text = "|cffffcc55DGs Junk|r\n\n" .. L["Remove %s from the ignore list?"],
     button1 = YES,
     button2 = NO,
     OnAccept = function(self) if type(self.data) == "function" then self.data() end end,
@@ -1989,26 +2303,78 @@ local function ItemHint(frame, id, action)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         local link = select(2, GetItemInfo(id))
         if link then GameTooltip:SetHyperlink(link)
-        else GameTooltip:SetText(select(1, ItemName(id)) or ("item " .. id)) end
-        GameTooltip:AddLine(GREY .. action .. " |cff888888(shift-click: no confirm)|r", 0.6, 0.6, 0.6, true)
+        else GameTooltip:SetText(select(1, ItemName(id)) or fmt(L["item %d"], id)) end
+        GameTooltip:AddLine(GREY .. action .. " |cff888888(" .. L["shift-click: no confirm"] .. ")|r", 0.6, 0.6, 0.6, true)
         GameTooltip:Show()
     end)
     frame:SetScript("OnLeave", GameTooltip_Hide)
 end
 
+-- There is no automatic layout in this UI: nothing resizes a button to its
+-- caption, and a fixed width that suits English silently clips or overlaps in
+-- any longer language. So every button measures its own label and the widths
+-- below are MINIMUMS, not fixed sizes.
+local BTN_PAD  = 26     -- breathing room either side of the caption
+local BTN_H    = 22
+-- Window width. Five tabs share this row, and the widest caption in any language
+-- decides how tight they look: "Einstellungen" needs noticeably more than
+-- "Settings", so the window is sized for the long case rather than the English one.
+local CONFIG_W = 580                    -- settings window width
+local PANEL_W  = CONFIG_W - 16          -- its panels are inset 8px either side
+local SCROLL_W = PANEL_W - 30           -- panels lose 4px left and 26px to the scrollbar
+
+local function FitButton(btn, minW, pad)
+    local fs = btn:GetFontString()
+    local w = fs and fs:GetStringWidth() or 0
+    btn:SetWidth(math.max(minW or 0, math.ceil(w) + (pad or BTN_PAD)))
+    return btn
+end
+
 local function ConfigBtn(parent, text, w, onClick)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    btn:SetSize(w or 90, 22)
+    btn:SetSize(w or 90, BTN_H)
     btn:SetText(text)
     btn:SetScript("OnClick", onClick)
+    FitButton(btn, w or 90)
     return btn
+end
+
+-- A row of buttons that must share one line. Each is fitted to its caption; if
+-- the row still would not fit, the padding is squeezed (down to a floor) before
+-- anything is allowed to overlap its neighbour.
+local function FitRow(buttons, available, gap)
+    local function total(pad)
+        local sum = 0
+        for _, b in ipairs(buttons) do
+            FitButton(b, 0, pad)
+            sum = sum + b:GetWidth()
+        end
+        return sum + gap * (#buttons - 1)
+    end
+    local pad = BTN_PAD
+    while total(pad) > available and pad > 8 do pad = pad - 2 end
+end
+
+-- Wrapping description line pinned to the top of a panel. Returns the height it
+-- actually occupies, so whatever follows can be anchored below it instead of at
+-- a guessed offset that only holds for English.
+local function PanelHint(panel, width, text)
+    local fs = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    fs:SetPoint("TOPLEFT", 4, -2)
+    fs:SetWidth(width - 8)
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(true)
+    fs:SetText(text)
+    return fs, math.ceil(fs:GetStringHeight()) + 6
 end
 
 local RefreshLog  -- fwd
 
 BuildConfig = function()
     config = CreateFrame("Frame", "DGsJunkConfig", UIParent, "BasicFrameTemplateWithInset")
-    config:SetSize(480, 740)     -- room for the extra Settings row (loot-row colouring)
+    -- Height is a starting point only: the Settings panel measures its own
+    -- content at the end of this function and grows the window if it needs more.
+    config:SetSize(CONFIG_W, 740)
     config:SetPoint("CENTER")
     config:SetMovable(true)
     config:EnableMouse(true)
@@ -2076,8 +2442,10 @@ BuildConfig = function()
 
     -- tab buttons
     config.tabBtns = {}
-    local order = { { "settings", "Settings" }, { "ignored", "Ignored" }, { "junk", "Junk" },
-                    { "debug", "Debug" }, { "log", "Log" } }
+    -- First entry of each pair is the panel key (internal, never translated);
+    -- the second is the visible tab label.
+    local order = { { "settings", L["Settings"] }, { "ignored", L["Ignored"] }, { "junk", L["Junk"] },
+                    { "debug", L["Debug"] }, { "log", L["Log"] } }
     for _, t in ipairs(order) do
         local b = ConfigBtn(config, t[2], 90, function() ShowTab(t[1]) end)
         -- selection art, hidden until ShowTab marks this tab active
@@ -2103,7 +2471,7 @@ BuildConfig = function()
             config.tabBtns[t[1]]:SetShown(show)
             if show then visible[#visible + 1] = t[1] end
         end
-        local w = math.floor((480 - 16 - (#visible - 1) * 4) / #visible)
+        local w = math.floor((PANEL_W - (#visible - 1) * 4) / #visible)
         for i, name in ipairs(visible) do
             local b = config.tabBtns[name]
             b:SetWidth(w)
@@ -2117,142 +2485,171 @@ BuildConfig = function()
 
     --====================== IGNORED panel ======================--
     local ip = config.panels.ignored
-    local hint = ip:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    hint:SetPoint("TOPLEFT", 4, -2)
-    hint:SetText("Ignored items - add via shift-right-click or right-click > Ignore")
+    local _, hintH = PanelHint(ip, PANEL_W, L["Ignored items - add via shift-right-click or right-click > Ignore"])
 
     local scroll = CreateFrame("ScrollFrame", "DGsJunkConfigScroll", ip, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 4, -20)
+    scroll:SetPoint("TOPLEFT", 4, -(2 + hintH))
     scroll:SetPoint("BOTTOMRIGHT", -26, 64)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(290, 1)
+    content:SetSize(SCROLL_W, 1)
     scroll:SetScrollChild(content)
     config.content = content
     config.rows = {}
 
-    local rj = ConfigBtn(ip, "Reset Junk",   100, function()
-        if IsShiftKeyDown() then ResetIgnores("junk") else ConfirmReset("junk", "ignored Junk") end
+    -- The category strings passed to ResetIgnores/ConfirmReset ("junk", "normal",
+    -- "all") are stored values and stay English; only the label beside them is
+    -- translated, because that is what ends up in the confirm text.
+    local rj = ConfigBtn(ip, L["Reset Junk"],   0, function()
+        if IsShiftKeyDown() then ResetIgnores("junk") else ConfirmReset("junk", L["ignored Junk"]) end
     end)
     rj:SetPoint("BOTTOMLEFT", 4, 4)
-    BtnHint(rj, "Reset ignored Junk", "Shift-click to skip the confirm.")
-    local rn = ConfigBtn(ip, "Reset Normal", 104, function()
-        if IsShiftKeyDown() then ResetIgnores("normal") else ConfirmReset("normal", "ignored Normal") end
+    BtnHint(rj, L["Reset ignored Junk"], L["Shift-click to skip the confirm."])
+    local rn = ConfigBtn(ip, L["Reset Normal"], 0, function()
+        if IsShiftKeyDown() then ResetIgnores("normal") else ConfirmReset("normal", L["ignored Normal"]) end
     end)
     rn:SetPoint("LEFT", rj, "RIGHT", 4, 0)
-    BtnHint(rn, "Reset ignored Normal", "Shift-click to skip the confirm.")
-    local ra = ConfigBtn(ip, "Reset All",    100, function()
-        if IsShiftKeyDown() then ResetIgnores(nil) else ConfirmReset("all", "the whole ignore list") end
+    BtnHint(rn, L["Reset ignored Normal"], L["Shift-click to skip the confirm."])
+    local ra = ConfigBtn(ip, L["Reset All"],    0, function()
+        if IsShiftKeyDown() then ResetIgnores(nil) else ConfirmReset("all", L["the whole ignore list"]) end
     end)
     ra:SetPoint("LEFT", rn, "RIGHT", 4, 0)
-    BtnHint(ra, "Reset the whole ignore list", "Shift-click to skip the confirm.")
+    BtnHint(ra, L["Reset the whole ignore list"], L["Shift-click to skip the confirm."])
+    -- All three sit on one line and chain off each other, so their widths decide
+    -- both the overlap and the gaps: fit them together against the panel width.
+    FitRow({ rj, rn, ra }, PANEL_W - 8, 4)
 
     --====================== JUNK panel ======================--
     local jp = config.panels.junk
-    local jhint = jp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    jhint:SetPoint("TOPLEFT", 4, -2)
-    jhint:SetText("Items you marked as junk that are in your bags - X unmarks them, nothing is deleted")
+    local _, jhintH = PanelHint(jp, PANEL_W,
+        L["Items you marked as junk that are in your bags - X unmarks them, nothing is deleted"])
 
     local jscroll = CreateFrame("ScrollFrame", "DGsJunkClearScroll", jp, "UIPanelScrollFrameTemplate")
-    jscroll:SetPoint("TOPLEFT", 4, -20)
+    jscroll:SetPoint("TOPLEFT", 4, -(2 + jhintH))
     jscroll:SetPoint("BOTTOMRIGHT", -26, 36)
     local jcontent = CreateFrame("Frame", nil, jscroll)
-    jcontent:SetSize(410, 1)
+    jcontent:SetSize(SCROLL_W, 1)
     jscroll:SetScrollChild(jcontent)
     config.junkContent = jcontent
     config.junkRows = {}
 
     local jempty = jp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    jempty:SetPoint("TOPLEFT", 8, -24)
-    jempty:SetText(GREY .. "No marked junk in your bags.|r")
+    jempty:SetPoint("TOPLEFT", 8, -(6 + jhintH))     -- below the hint, however tall it wrapped
+    jempty:SetText(GREY .. L["No marked junk in your bags."] .. "|r")
     config.junkEmpty = jempty
 
-    local jca = ConfigBtn(jp, "Clear all junk", 130, function()
+    local jca = ConfigBtn(jp, L["Clear all junk"], 0, function()
         if IsShiftKeyDown() then ClearAllMarks() else ConfirmClearAll() end
     end)
     jca:SetPoint("BOTTOMLEFT", 4, 4)
-    BtnHint(jca, "Unmark everything you marked as junk", "Shift-click to skip the confirm.")
+    BtnHint(jca, L["Unmark everything you marked as junk"], L["Shift-click to skip the confirm."])
     config.junkClearAll = jca
 
     --====================== SETTINGS panel ======================--
     local sp = config.panels.settings
     -- enableFn (optional) is re-evaluated on every Refresh, so a checkbox can go
     -- live when its dependency loads after us. offTip shows while disabled.
-    local function Check(label, y, getFn, setFn, tip, enableFn, offTip)
+    -- `label`, `tip` and `offTip` arrive as ENGLISH keys and are translated here,
+    -- at the point of display. That is deliberate: act() below logs the raw
+    -- `label`, so the Log tab keeps naming settings in English no matter which
+    -- client locale is running.
+    -- Running vertical cursor. The description lines wrap, and how many lines
+    -- they wrap to depends on the language, so no fixed set of offsets can be
+    -- right for every locale: each row reports the height it actually used and
+    -- the next one starts below that.
+    local spY = -6
+
+    local function Check(label, getFn, setFn, tip, enableFn, offTip)
         local cb = CreateFrame("CheckButton", nil, sp, "UICheckButtonTemplate")
-        cb:SetPoint("TOPLEFT", 4, y)
+        cb:SetPoint("TOPLEFT", 4, spY)
         local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         fs:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-        fs:SetText(label)
+        fs:SetText(L[label])
         cb:SetScript("OnClick", function(self)
             local v = self:GetChecked() and true or false
             setFn(v)
             act("setting", nil, label .. " = " .. tostring(v))
         end)
+        local used = 28
         local d
         if tip then
             d = sp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
             d:SetPoint("TOPLEFT", cb, "BOTTOMLEFT", 4, 2)
-            d:SetPoint("RIGHT", sp, "RIGHT", -8, 0)   -- constrain width so it wraps
+            d:SetWidth(PANEL_W - 20)                  -- explicit width so it wraps AND can be measured
             d:SetJustifyH("LEFT")
             d:SetWordWrap(true)
-            d:SetText(tip)
+            -- Reserve the taller of the two texts. Refresh() swaps between them
+            -- when Auctionator loads or goes missing, and a row that changed
+            -- height at runtime would shove everything below it out of place.
+            d:SetText(L[tip])
+            local h = math.ceil(d:GetStringHeight())
+            if offTip then
+                d:SetText(L[offTip])
+                h = math.max(h, math.ceil(d:GetStringHeight()))
+                d:SetText(L[tip])
+            end
+            d:SetHeight(h)
+            used = used + h + 6
         end
+        spY = spY - used
         cb.Refresh = function()
             cb:SetChecked(getFn())
             if not enableFn then return end
             if enableFn() then
                 cb:Enable()
                 fs:SetTextColor(1, 0.82, 0)                    -- GameFontNormal yellow
-                if d then d:SetText(tip); d:SetTextColor(0.5, 0.5, 0.5) end
+                if d then d:SetText(L[tip]); d:SetTextColor(0.5, 0.5, 0.5) end
             else
                 cb:Disable()
                 fs:SetTextColor(0.5, 0.5, 0.5)
-                if d then d:SetText(offTip or tip); d:SetTextColor(0.9, 0.35, 0.35) end
+                if d then d:SetText(L[offTip or tip]); d:SetTextColor(0.9, 0.35, 0.35) end
             end
         end
         return cb
     end
     config.checks = {}
-    config.checks.loot = Check("Loot-assist", -6,
+    config.checks.loot = Check("Loot-assist",
         function() return DB.lootAssist ~= false end,
         function(v) DB.lootAssist = v end,
-        "Shift-click a loot item with full bags to clear a junk item and loot it")
-    config.checks.lootColor = Check("Colour loot rows", -54,
+        "Shift-click a loot item with full bags to choose what to delete, then loot it")
+    config.checks.lootColor = Check("Colour loot rows",
         function() return DB.lootColor ~= false end,
         function(v) DB.lootColor = v; ColorLootRows() end,
-        "Tints the loot window green (worth more than your cheapest junk) or red (skip it)")
-    config.checks.ah = Check("Suggest by AH prices", -102,
+        "Tints the loot window green (worth more than the cheapest thing you would delete) or red (skip it), only while your bags are full")
+    config.checks.ah = Check("Suggest by AH prices",
         function() return DB.ahSuggest end,
         function(v) DB.ahSuggest = v; Update() end,
         "Rank by Auctionator AH value instead of vendor (falls back to vendor)",
         HasAuctionator,
         "Requires Auctionator (not installed / not detected) - ranking uses vendor prices")
-    config.checks.show = Check("Show item frames", -152,
+    config.checks.show = Check("Show item frames",
         function() return DB.showFrames ~= false end,
         function(v) DB.showFrames = v; Update() end,
         "Master toggle - same as left-clicking the minimap icon")
-    config.checks.always = Check("Always show item frames", -196,
+    config.checks.always = Check("Always show item frames",
         function() return DB.alwaysShow end,
         function(v) DB.alwaysShow = v; Update() end,
         "Keep the icons visible even when there is nothing to delete")
-    config.checks.minimap = Check("Show minimap icon", -240,
+    config.checks.minimap = Check("Show minimap icon",
         function() return DB.minimap ~= false end,
         function(v) DB.minimap = v; ApplyMinimap() end,
         "Minimap button: left-click show/hide frames, right-click settings")
-    config.checks.autosell = Check("Auto-sell marked items at vendors", -284,
+    config.checks.autosell = Check("Auto-sell marked items at vendors",
         function() return DB.autoSell end,
         function(v) DB.autoSell = v end,
         "Sells only items YOU marked as junk and only above gray quality - grays are left to sell-all-junk")
-    local rp = ConfigBtn(sp, "Reset icon position", 160, function()
+
+    spY = spY - 10
+    local rp = ConfigBtn(sp, L["Reset icon position"], 0, function()
         if DB then DB.pos = nil end
         junkIcon:ClearAllPoints()
         junkIcon:SetPoint("CENTER", 0, -140)
     end)
-    rp:SetPoint("TOPLEFT", 8, -340)
+    rp:SetPoint("TOPLEFT", 8, spY)
+    spY = spY - BTN_H - 26        -- the slider carries its label above the bar
 
     -- frame scale slider (50%..200%)
     local slider = CreateFrame("Slider", "DGsJunkScaleSlider", sp, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", 14, -390)
+    slider:SetPoint("TOPLEFT", 14, spY)
     slider:SetWidth(200)
     slider:SetMinMaxValues(0.5, 2.0)
     slider:SetValueStep(0.05)
@@ -2264,22 +2661,142 @@ BuildConfig = function()
         v = math.floor(v * 20 + 0.5) / 20                 -- snap to 0.05
         DB.scale = v
         ApplyScale()
-        if slabel then slabel:SetText(string.format("Frame scale: %d%%", v * 100)) end
+        if slabel then slabel:SetText(fmt(L["Frame scale: %d%%"], v * 100)) end
     end)
     slider.Refresh = function()
         slider:SetValue(DB.scale or 1)
-        if slabel then slabel:SetText(string.format("Frame scale: %d%%", (DB.scale or 1) * 100)) end
+        if slabel then slabel:SetText(fmt(L["Frame scale: %d%%"], (DB.scale or 1) * 100)) end
     end
     config.scaleSlider = slider
+    spY = spY - 46                -- bar plus the 50%/200% end labels beneath it
+
+    -- language, independent of the client's own locale
+    local lhdr = sp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    lhdr:SetPoint("TOPLEFT", 4, spY)
+    lhdr:SetText(L["Language"])
+    spY = spY - 24
+
+    -- DB.locale = nil means "follow the client", which is the default; anything
+    -- else is an explicit override that beats GetLocale() on the next load. It
+    -- cannot apply live: every label in this file was built from L while the file
+    -- ran, so the picker stores the choice and says a /reload is needed. enUS is
+    -- stored explicitly rather than as nil, otherwise picking English on a German
+    -- client would just mean "follow the client" again and stay German.
+    local LANGS = {
+        { key = false,  name = L["Automatic (game language)"] },
+        { key = "enUS", name = L["English"] },
+        { key = "deDE", name = "Deutsch" },   -- endonym: a German speaker looks for "Deutsch"
+    }
+    local lnote                                        -- fwd decl (the /reload hint)
+    local function LangKey() return DB.locale or false end
+    local function LangName(key)
+        for _, e in ipairs(LANGS) do if e.key == key then return e.name end end
+        return tostring(key)
+    end
+    -- Stored and applied in one go, straight from the popup's OnAccept. The
+    -- setting is written first so it survives the reload that follows it.
+    local function LangApply(key)
+        DB.locale = key or nil
+        act("setting", nil, "locale = " .. tostring(DB.locale or "auto"))
+        ReloadUI()
+    end
+    local function LangSet(key)
+        if key == LangKey() then return end          -- already on it: nothing to confirm
+        -- Never reload out from under a fight. This addon is used on Hardcore,
+        -- where a loading screen mid-combat can cost the character, so the answer
+        -- is "later", not a reload the player did not think through.
+        if InCombatLockdown() then
+            print(GOLD .. "DGs Junk|r " .. L["not while you are in combat - try again afterwards."])
+            if config.RefreshLang then config.RefreshLang() end
+            return
+        end
+        StaticPopup_Show("DGSJUNK_CONFIRM_LANG", LangName(key), nil, function() LangApply(key) end)
+        -- The click only opened a question. Nothing is stored yet, so the widget
+        -- is put back on the current language until the popup is accepted.
+        if config.RefreshLang then config.RefreshLang() end
+    end
+    local function BuildLangMenu(_, root)
+        for _, e in ipairs(LANGS) do
+            root:CreateRadio(e.name,
+                function() return LangKey() == e.key end,
+                function() LangSet(e.key) end)
+        end
+    end
+
+    -- Same widget story as the profile picker below: the new DropdownButton when
+    -- the client has it, a plain button plus context menu when it does not.
+    local bLang
+    local okL, ddL = pcall(CreateFrame, "DropdownButton", nil, sp, "WowStyle1DropdownTemplate")
+    if okL and ddL and ddL.SetupMenu then
+        ddL:SetSize(190, 24)
+        ddL:SetupMenu(BuildLangMenu)
+        bLang = ddL
+        config.langIsDropdown = true
+    else
+        bLang = ConfigBtn(sp, fmt(L["Language: %s"], L["Automatic (game language)"]), 190, function(self)
+            if MenuUtil and MenuUtil.CreateContextMenu then
+                MenuUtil.CreateContextMenu(self, BuildLangMenu)
+            else
+                -- no menu API at all: cycle automatic -> English -> Deutsch -> automatic
+                local nextKey = { [tostring(false)] = "enUS", enUS = "deDE", deDE = false }
+                LangSet(nextKey[tostring(LangKey())])
+            end
+        end)
+    end
+    bLang:SetPoint("TOPLEFT", 6, spY)
+    spY = spY - 28
+    BtnHint(bLang, L["Addon language"],
+        L["Automatic follows the game's language. Pick English or Deutsch to override it, whatever the client is set to. Changing it asks first, then reloads your interface."])
+    config.langPick = bLang
+
+    lnote = sp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    lnote:SetPoint("TOPLEFT", 6, spY)
+    lnote:SetWidth(PANEL_W - 20)
+    lnote:SetJustifyH("LEFT"); lnote:SetWordWrap(true)
+    config.langNote = lnote
+
+    config.RefreshLang = function()
+        if config.langPick then
+            local label = LangName(LangKey())
+            if config.langIsDropdown then
+                config.langPick:SetDefaultText(label)
+                if config.langPick.GenerateMenu then config.langPick:GenerateMenu() end
+            else
+                config.langPick:SetText(fmt(L["Language: %s"], label))
+            end
+        end
+        if not config.langNote then return end
+        -- Compare against the locale actually in use, not against the stored
+        -- value: picking Automatic on a German client changes nothing when German
+        -- is already what loaded, and asking for a reload there would be wrong.
+        local effective = DB.locale or GetLocale()
+        if localeStale or effective ~= activeLocale then
+            config.langNote:SetText(GOLD .. L["Type /reload to apply the new language."] .. "|r")
+        else
+            config.langNote:SetText(L["The game's own language is used unless you override it here."])
+        end
+    end
+    config.RefreshLang()
+    -- Reserve the taller of the two notes: the hint swaps for the reload warning
+    -- when you pick something, and a line that grew would shove the profile
+    -- section below it out of place.
+    local lnoteH = math.ceil(lnote:GetStringHeight())
+    lnote:SetText(GOLD .. L["Type /reload to apply the new language."] .. "|r")
+    lnoteH = math.max(lnoteH, math.ceil(lnote:GetStringHeight()))
+    config.RefreshLang()
+    lnote:SetHeight(lnoteH)
+    spY = spY - lnoteH - 10
 
     -- character data profile (scopes the ignore list + junk marks only)
     local phdr = sp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    phdr:SetPoint("TOPLEFT", 4, -458)
-    phdr:SetText("Character profile")
+    phdr:SetPoint("TOPLEFT", 4, spY)
+    phdr:SetText(L["Character profile"])
+    spY = spY - 20
     local pstat = sp:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    pstat:SetPoint("TOPLEFT", 4, -478)
+    pstat:SetPoint("TOPLEFT", 4, spY)
     pstat:SetPoint("RIGHT", sp, "RIGHT", -8, 0); pstat:SetJustifyH("LEFT")
     config.profileStatus = pstat
+    spY = spY - 24
 
     -- Profile picker. 1.15.9 ships Blizzard's new dropdown widget
     -- (DropdownButton + WowStyle1DropdownTemplate + SetupMenu); the old
@@ -2288,7 +2805,7 @@ BuildConfig = function()
     local function BuildProfileMenu(_, root)
         local k = CharKey()
         local me = UnitName("player") or k
-        root:CreateRadio("Default (shared)",
+        root:CreateRadio(L["Default (shared)"],
             function() return ActiveProfileName() == "Main" end,
             function() ProfileSwitchTo("Main") end)
         root:CreateRadio(me,
@@ -2304,7 +2821,7 @@ BuildConfig = function()
         bSwitch = dd
         config.profileIsDropdown = true
     else
-        bSwitch = ConfigBtn(sp, "Profile: Default", 190, function(self)
+        bSwitch = ConfigBtn(sp, fmt(L["Profile: %s"], L["Default"]), 190, function(self)
             if MenuUtil and MenuUtil.CreateContextMenu then
                 MenuUtil.CreateContextMenu(self, BuildProfileMenu)
             else
@@ -2312,35 +2829,44 @@ BuildConfig = function()
             end
         end)
     end
-    bSwitch:SetPoint("TOPLEFT", 6, -498)
-    BtnHint(bSwitch, "Switch profile", "Default is shared by every character on it; the character profile is private. Both always exist, switching never deletes either.")
+    bSwitch:SetPoint("TOPLEFT", 6, spY)
+    spY = spY - 28
+    BtnHint(bSwitch, L["Switch profile"], L["Default is shared by every character on it; the character profile is private. Both always exist, switching never deletes either."])
     config.profileSwitch = bSwitch
 
     -- Copy buttons only make sense on the character profile: on Default there is
     -- no second list to copy from or to, so they are hidden entirely.
-    local bFrom = ConfigBtn(sp, "Copy from Default", 150, function()
+    local bFrom = ConfigBtn(sp, L["Copy from Default"], 0, function()
         if IsShiftKeyDown() then ProfileCopyFromMain()
         else StaticPopup_Show("DGSJUNK_PROFILE_ACTION",
-            "replace this character's list with a copy of Default", nil, ProfileCopyFromMain) end
+            L["replace this character's list with a copy of Default"], nil, ProfileCopyFromMain) end
     end)
-    bFrom:SetPoint("TOPLEFT", 6, -526)
-    BtnHint(bFrom, "Pull Default into this character", "Overwrites this character's ignore list + junk marks. Shift-click skips confirm.")
+    bFrom:SetPoint("TOPLEFT", 6, spY)
+    BtnHint(bFrom, L["Pull Default into this character"], L["Overwrites this character's ignore list + junk marks. Shift-click skips confirm."])
     config.profileCopyFrom = bFrom
 
-    local bTo = ConfigBtn(sp, "Copy to Default", 150, function()
+    local bTo = ConfigBtn(sp, L["Copy to Default"], 0, function()
         if IsShiftKeyDown() then ProfileCopyToMain()
         else StaticPopup_Show("DGSJUNK_PROFILE_ACTION",
-            "overwrite Default with this character's list", nil, ProfileCopyToMain) end
+            L["overwrite Default with this character's list"], nil, ProfileCopyToMain) end
     end)
     bTo:SetPoint("LEFT", bFrom, "RIGHT", 4, 0)
-    BtnHint(bTo, "Push this character into Default", "Overwrites the shared Default list for every character on it. Shift-click skips confirm.")
+    BtnHint(bTo, L["Push this character into Default"], L["Overwrites the shared Default list for every character on it. Shift-click skips confirm."])
     config.profileCopyTo = bTo
+    FitRow({ bFrom, bTo }, PANEL_W - 12, 4)
+    spY = spY - BTN_H - 8
 
     local pdesc = sp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    pdesc:SetPoint("TOPLEFT", 6, -554)
-    pdesc:SetPoint("RIGHT", sp, "RIGHT", -8, 0)
+    pdesc:SetPoint("TOPLEFT", 6, spY)
+    pdesc:SetWidth(PANEL_W - 20)
     pdesc:SetJustifyH("LEFT"); pdesc:SetWordWrap(true)
-    pdesc:SetText("Profiles scope only the ignore list and junk marks; every setting above is shared across your characters. \"Default\" is the shared list, every character on it sees the same entries.")
+    pdesc:SetText(L["Profiles scope only the ignore list and junk marks; every setting above is shared across your characters. \"Default\" is the shared list, every character on it sees the same entries."])
+    spY = spY - math.ceil(pdesc:GetStringHeight()) - 8
+
+    -- The window is sized to whatever the Settings tab actually needed. German
+    -- descriptions wrap to two lines where English fits on one, so a height that
+    -- is right for English cuts the profile section off in German.
+    config:SetHeight(math.max(740, 78 + math.abs(spY) + 20))
 
     config.RefreshProfile = function()
         local name = ActiveProfileName()
@@ -2350,20 +2876,22 @@ BuildConfig = function()
         local me = UnitName("player") or name
         local text
         if onDefault then
-            text = "This character uses: " .. GREEN .. "Default|r |cff888888(shared list)|r"
+            text = fmt(L["This character uses: %s"],
+                GREEN .. L["Default"] .. "|r |cff888888(" .. L["shared list"] .. ")|r")
         else
-            text = "This character uses: " .. GOLD .. me .. "|r |cff888888(own list)|r"
+            text = fmt(L["This character uses: %s"],
+                GOLD .. me .. "|r |cff888888(" .. L["own list"] .. ")|r")
         end
         if config.profileStatus then config.profileStatus:SetText(text) end
         if config.profileTop then config.profileTop:SetText(text) end
         if config.profileSwitch then
-            local label = onDefault and "Default (shared)" or me
+            local label = onDefault and L["Default (shared)"] or me
             if config.profileIsDropdown then
                 -- the widget derives its text from the selected radio entry
                 config.profileSwitch:SetDefaultText(label)
                 if config.profileSwitch.GenerateMenu then config.profileSwitch:GenerateMenu() end
             else
-                config.profileSwitch:SetText("Profile: " .. label)
+                config.profileSwitch:SetText(fmt(L["Profile: %s"], label))
             end
         end
         -- nothing to copy from/to while Default itself is the active list
@@ -2376,23 +2904,27 @@ BuildConfig = function()
     -- real bag items, so what you see is what the game shows - only the actions
     -- are suppressed.
     local dp = config.panels.debug
-    local dhint = dp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    dhint:SetPoint("TOPLEFT", 4, -2)
-    dhint:SetPoint("RIGHT", dp, "RIGHT", -8, 0)
-    dhint:SetJustifyH("LEFT"); dhint:SetWordWrap(true)
-    dhint:SetText("Open the addon's dialogs on demand, without having to fill your bags first. They use your real items and the real ranking; clicking anything in them does nothing - " .. RED .. "nothing is ever deleted|r.")
+    local dhint, dhintH = PanelHint(dp, PANEL_W,
+        fmt(L["Open the addon's dialogs on demand, without having to fill your bags first. They use your real items and the real ranking; clicking anything in them does nothing - %s."],
+            RED .. L["nothing is ever deleted"] .. "|r"))
+    config.debugHint = dhint
 
-    local pv = ConfigBtn(dp, "Show comparison dialog", 220, PreviewToggle)
-    pv:SetPoint("TOPLEFT", 8, -56)
-    BtnHint(pv, "Full-bags comparison dialog",
-        "Picks a random bag item worth more than your two cheapest, so the \"worth it\" verdict shows. Also available as /dgjunk preview.")
+    -- Sized for BOTH captions: the toggle swaps between them, and a button that
+    -- resized under the cursor would be a moving target.
+    local pv = ConfigBtn(dp, L["Hide comparison dialog"], 0, PreviewToggle)
+    local pvW = pv:GetWidth()
+    pv:SetText(L["Show comparison dialog"])
+    pv:SetWidth(math.max(pvW, FitButton(pv, 0):GetWidth()))
+    pv:SetPoint("TOPLEFT", 8, -(12 + dhintH))
+    BtnHint(pv, L["Full-bags comparison dialog"],
+        L["Picks a random bag item worth more than your two cheapest, so the \"worth it\" verdict shows. Also available as /dgjunk preview."])
     config.previewBtn = pv
 
     -- Single source of truth for the label: the dialog's own visibility. Closing
     -- it any way at all (X, Escape, Cancel) runs its OnHide, which calls this.
     PreviewBtnSync = function()
         if not (config and config.previewBtn) then return end
-        config.previewBtn:SetText(PreviewShown() and "Hide comparison dialog" or "Show comparison dialog")
+        config.previewBtn:SetText(PreviewShown() and L["Hide comparison dialog"] or L["Show comparison dialog"])
     end
     PreviewBtnSync()
 
@@ -2404,29 +2936,29 @@ BuildConfig = function()
     dchk:SetPoint("TOPLEFT", 4, -2)
     local dlbl = dchk:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     dlbl:SetPoint("LEFT", dchk, "RIGHT", 2, 0)
-    dlbl:SetText("Debug logging")
+    dlbl:SetText(L["Debug logging"])
     local ddesc = lp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     ddesc:SetPoint("TOPLEFT", dchk, "BOTTOMLEFT", 4, 2)
-    ddesc:SetPoint("RIGHT", lp, "RIGHT", -8, 0)
+    ddesc:SetWidth(PANEL_W - 20)
     ddesc:SetJustifyH("LEFT"); ddesc:SetWordWrap(true)
-    ddesc:SetText("Record diagnostic messages here (never printed to chat)")
+    ddesc:SetText(L["Record diagnostic messages here (never printed to chat)"])
     dchk.Refresh = function() dchk:SetChecked(DB and DB.debug) end
     config.checks.debug = dchk
 
     local lscroll = CreateFrame("ScrollFrame", "DGsJunkLogScroll", lp, "UIPanelScrollFrameTemplate")
-    lscroll:SetPoint("TOPLEFT", 4, -48)
+    lscroll:SetPoint("TOPLEFT", 4, -(30 + math.ceil(ddesc:GetStringHeight())))
     lscroll:SetPoint("BOTTOMRIGHT", -26, 34)
     local edit = CreateFrame("EditBox", nil, lscroll)
     edit:SetMultiLine(true)
     edit:SetAutoFocus(false)
     edit:SetFontObject(ChatFontNormal)
-    edit:SetWidth(300)
+    edit:SetWidth(SCROLL_W - 10)
     edit:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
     lscroll:SetScrollChild(edit)
     config.logEdit = edit
-    local lclr = ConfigBtn(lp, "Clear", 90, function() DB.log = {}; RefreshLog() end)
+    local lclr = ConfigBtn(lp, L["Clear"], 90, function() DB.log = {}; RefreshLog() end)
     lclr:SetPoint("BOTTOMLEFT", 4, 4)
-    local lref = ConfigBtn(lp, "Refresh", 90, function() RefreshLog() end)
+    local lref = ConfigBtn(lp, L["Refresh"], 90, function() RefreshLog() end)
     lref:SetPoint("LEFT", lclr, "RIGHT", 4, 0)
 
     -- only show the log view + buttons while debug logging is enabled
@@ -2451,7 +2983,7 @@ end
 RefreshLog = function()
     if not (config and config.logEdit) then return end
     local lines = DB and DB.log or {}
-    config.logEdit:SetText(#lines > 0 and table.concat(lines, "\n") or "(log empty - enable Debug logging)")
+    config.logEdit:SetText(#lines > 0 and table.concat(lines, "\n") or L["(log empty - enable Debug logging)"])
     config.logEdit:SetCursorPosition(0)
 end
 
@@ -2461,6 +2993,7 @@ RefreshConfig = function()
     if config.LayoutTabs then config.LayoutTabs() end
     if PreviewBtnSync then PreviewBtnSync() end
     if config.scaleSlider then config.scaleSlider.Refresh() end
+    if config.RefreshLang then config.RefreshLang() end
     if config.RefreshProfile then config.RefreshProfile() end
     if not config.rows then return end
     for _, r in ipairs(config.rows) do r:Hide() end
@@ -2479,20 +3012,20 @@ RefreshConfig = function()
         local r = config.rows[i]
         if not r then
             r = CreateFrame("Frame", nil, config.content)
-            r:SetSize(288, 20)
+            r:SetSize(SCROLL_W - 2, 20)
             r.icon = r:CreateTexture(nil, "ARTWORK")
             r.icon:SetSize(16, 16); r.icon:SetPoint("LEFT", 2, 0)
             r.tag = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
             r.tag:SetPoint("LEFT", 22, 0); r.tag:SetWidth(52); r.tag:SetJustifyH("LEFT")
             r.text = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            r.text:SetPoint("LEFT", 76, 0); r.text:SetWidth(180); r.text:SetJustifyH("LEFT")
+            r.text:SetPoint("LEFT", 76, 0); r.text:SetWidth(SCROLL_W - 102); r.text:SetJustifyH("LEFT")
             r.x = CreateFrame("Button", nil, r, "UIPanelCloseButton")
             r.x:SetSize(20, 20); r.x:SetPoint("RIGHT", 2, 0)
             config.rows[i] = r
         end
         local name, tex = ItemName(entry.id)
         r.icon:SetTexture(tex or 134400)
-        r.tag:SetText(entry.cat == "junk" and GREY .. "Junk|r" or GOLD .. "Normal|r")
+        r.tag:SetText(entry.cat == "junk" and GREY .. L["Junk"] .. "|r" or GOLD .. L["Normal"] .. "|r")
         r.text:SetText(name)
         r.x:SetScript("OnClick", function()
             local function doRemove()
@@ -2503,7 +3036,7 @@ RefreshConfig = function()
             if IsShiftKeyDown() then doRemove()
             else StaticPopup_Show("DGSJUNK_CONFIRM_UNIGNORE", (select(1, ItemName(entry.id))), nil, doRemove) end
         end)
-        ItemHint(r.x, entry.id, "Remove from ignore list.")
+        ItemHint(r.x, entry.id, L["Remove from ignore list."])
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", 0, -y)
         r:Show()
@@ -2526,13 +3059,13 @@ RefreshJunkList = function()
         local r = config.junkRows[i]
         if not r then
             r = CreateFrame("Frame", nil, config.junkContent)
-            r:SetSize(408, 20)
+            r:SetSize(SCROLL_W - 2, 20)
             r.icon = r:CreateTexture(nil, "ARTWORK")
             r.icon:SetSize(16, 16); r.icon:SetPoint("LEFT", 2, 0)
             r.text = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            r.text:SetPoint("LEFT", 22, 0); r.text:SetWidth(250); r.text:SetJustifyH("LEFT")
+            r.text:SetPoint("LEFT", 22, 0); r.text:SetWidth(SCROLL_W - 158); r.text:SetJustifyH("LEFT")
             r.price = r:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-            r.price:SetPoint("LEFT", 276, 0); r.price:SetWidth(88); r.price:SetJustifyH("RIGHT")
+            r.price:SetPoint("RIGHT", -26, 0); r.price:SetWidth(88); r.price:SetJustifyH("RIGHT")
             r.x = CreateFrame("Button", nil, r, "UIPanelCloseButton")
             r.x:SetSize(20, 20); r.x:SetPoint("RIGHT", 2, 0)
             config.junkRows[i] = r
@@ -2553,7 +3086,7 @@ RefreshJunkList = function()
             if IsShiftKeyDown() then doUnmark()
             else StaticPopup_Show("DGSJUNK_CONFIRM_UNMARK", (select(1, ItemName(entry.id))), nil, doUnmark) end
         end)
-        ItemHint(r.x, entry.id, "Unmark as junk. Shift-click to skip the confirm.")
+        ItemHint(r.x, entry.id, L["Unmark as junk. Shift-click to skip the confirm."])
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", 0, -y)
         r:Show()
@@ -2574,13 +3107,44 @@ SlashCmdList.DGSJUNK = function(msg)
         if not config then BuildConfig() end
         config.LayoutTabs()
         if not DB.devMode then CloseLootConfirm() end   -- a preview must not outlive dev mode
-        print(GOLD .. "DGs Junk|r development mode " ..
-            (DB.devMode and (GREEN .. "on|r - the Debug tab is available") or (RED .. "off|r")))
+        print(GOLD .. "DGs Junk|r " .. fmt(L["development mode %s"],
+            DB.devMode and (GREEN .. L["on"] .. "|r " .. L["- the Debug tab is available"])
+                        or (RED .. L["off"] .. "|r")))
+        return
+    end
+    -- Development only, like "dev" above: forces a locale so the German layout
+    -- can be checked without installing a second language pack. Everything the
+    -- addon draws is built once at load, so this stores the choice and asks for
+    -- a /reload rather than pretending it can re-label live frames.
+    if cmd == "lang" then
+        if not (DB and DB.devMode) then
+            print(GOLD .. "DGs Junk|r " .. L["development mode is off (/dgjunk dev)."])
+            return
+        end
+        local want = (msg or ""):match("^%s*%S+%s+(%S+)")
+        local alias = { de = "deDE", dede = "deDE", en = "enUS", enus = "enUS",
+                        auto = "auto", off = "auto" }
+        want = want and (alias[want:lower()] or want) or nil
+        if want ~= "enUS" and want ~= "auto" and not locales[want or ""] then
+            local have = { "auto", "enUS" }
+            for name in pairs(locales) do have[#have + 1] = name end
+            table.sort(have)
+            print(GOLD .. "DGs Junk|r locale: " .. (activeLocale or "?") ..
+                " | usage: /dgjunk lang " .. table.concat(have, "|"))
+            return
+        end
+        -- "auto" is the only value stored as nil: that is what makes the client's
+        -- locale win. enUS is stored explicitly, because on a German client nil
+        -- would mean "follow the client" and English would never take effect.
+        DB.locale = (want ~= "auto") and want or nil
+        act("locale", nil, tostring(DB.locale or "auto"))
+        if config and config.RefreshLang then config.RefreshLang() end
+        print(GOLD .. "DGs Junk|r locale set to " .. (DB.locale or "auto") .. " - type /reload to apply.")
         return
     end
     if cmd == "preview" then
         if not (DB and DB.devMode) then
-            print(GOLD .. "DGs Junk|r development mode is off (/dgjunk dev).")
+            print(GOLD .. "DGs Junk|r " .. L["development mode is off (/dgjunk dev)."])
             return
         end
         if not config then BuildConfig() end     -- the Debug tab owns the label sync

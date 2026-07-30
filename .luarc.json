@@ -25,7 +25,7 @@
     "GetNumLootItems", "GetLootSlotLink", "GetLootSlotInfo", "LootSlot",
     "LootSlotHasItem", "GetMerchantItemLink",
     "GetLootRollItemLink", "GetCursorPosition",
-    "UnitName", "GetRealmName", "IsShiftKeyDown", "IsControlKeyDown", "IsAltKeyDown",
+    "UnitName", "GetRealmName", "GetLocale", "IsShiftKeyDown", "IsControlKeyDown", "IsAltKeyDown",
     "InCombatLockdown", "hooksecurefunc", "issecurevariable",
     "SlashCmdList", "SLASH_DGSJUNK1", "ReloadUI",
 
