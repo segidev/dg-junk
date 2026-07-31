@@ -1586,10 +1586,16 @@ local function BuildConfirm()
         local rj = jl[1] and jl[1].value or math.huge
         local ro = ol[1] and ol[1].value or math.huge
         local best = (rj <= ro) and f.junkBtn or f.otherBtn
+        -- A quest item is not a trade. There is no price it loses to, so nothing
+        -- on the right may be called too expensive for it: the cheaper head is
+        -- still recommended (you do have to free a slot), and the other one is
+        -- left neutral rather than warned against. Only quest items get this -
+        -- everywhere else the red verdict is the whole point.
+        local questLoot = (f.lid and IsQuestItem(f.lid)) and true or false
         for _, b in ipairs({ f.junkBtn, f.otherBtn }) do
             local rec = b.rec
             if rec then
-                if f.lworth and rec.value >= f.lworth then
+                if not questLoot and f.lworth and rec.value >= f.lworth then
                     -- paged up past the point where the trade pays off
                     b.SetBorder(0.85, 0.15, 0.15)
                     b.tag:SetText(RED .. L["costs more than the loot"] .. "|r")
@@ -1605,15 +1611,15 @@ local function BuildConfirm()
         -- CHEAPEST stack you would have to destroy. Paging does not move it, or
         -- the dialog and the tooltip would start contradicting each other.
         local lo = math.min(rj, ro)
-        if f.lootVerdict then
+        if questLoot and not f.lootVerdict then
+            f.lootBtn.SetBorder(0.1, 0.85, 0.2)
+            f.lootBtn.tag:SetText(GREEN .. L["quest - take it"] .. "|r")
+        elseif f.lootVerdict then
             -- A container's contents are not visible before it is opened, so
             -- there is no honest worth to compare. Judging the wrapper's own
             -- vendor price would answer a question nobody asked.
             f.lootBtn.SetBorder(0.3, 0.3, 0.3)
             f.lootBtn.tag:SetText(GREY .. f.lootVerdict .. "|r")
-        elseif f.lid and IsQuestItem(f.lid) then
-            f.lootBtn.SetBorder(0.1, 0.85, 0.2)
-            f.lootBtn.tag:SetText(GREEN .. L["quest - take it"] .. "|r")
         elseif f.lworth and lo < math.huge then
             if f.lworth > lo then
                 f.lootBtn.SetBorder(0.1, 0.85, 0.2)
@@ -1637,7 +1643,8 @@ local function BuildConfirm()
             "| loot worth=" .. tostring(f.lworth or 0) .. "c",
             "cheapest=" .. (lo < math.huge and (lo .. "c") or "none"),
             "| verdict=" .. (f.lootBtn.tag:GetText() or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""),
-            "| recommend=" .. ((best == f.junkBtn) and "junk" or "other"))
+            "| recommend=" .. ((best == f.junkBtn) and "junk" or "other") ..
+            (questLoot and " (quest: no candidate marked too expensive)" or ""))
     end
 
     f.Step = function(which, dir)

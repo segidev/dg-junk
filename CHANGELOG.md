@@ -12,6 +12,10 @@
   Contents that land straight in your bags are listed in chat with their value; contents that open a
   loot window go through the normal loot verdicts instead. On by default, with its own switch in the
   settings.
+- **Quest items no longer get priced.** A quest item is not a trade you can lose, so the comparison
+  dialog stops telling you both of your candidates are too expensive for it. The cheaper of the two
+  is still marked green as the one to give up, and the other is simply left neutral instead of
+  warned against. Everything that is not a quest item keeps the old red verdict.
 
 ## 1.2
 
