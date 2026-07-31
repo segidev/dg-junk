@@ -49,10 +49,14 @@ auction-house value. Hover for the item tooltip and the available actions.
   - Each item appears once, not once per bag slot, and you are offered its smallest stack.
   - **Right-click** an item to ignore it, **shift-right-click** to skip the menu. It drops out of
     the list and the next candidate takes its place.
-- **Container assist**. Right-clicking a clam, lockbox or pack that will not open because your bags
-  are full brings up that same dialog, and once you have freed a slot the addon opens the container
-  for you. If the contents land straight in your bags it then tells you what arrived and what it is
-  worth. Needs more than one slot? It simply asks again. On by default, switch in the settings.
+- **Opening things with full bags.** A container that opens into a loot window (a clam, a lockbox)
+  is never offered as the item to destroy while you are looting it: it stays in your bag until its
+  contents are taken, and destroying it would take them with it. Nor is anything the game has
+  locked, since deleting a locked item silently does nothing.
+  - Should a container refuse to open at all for want of a slot, you get the same pick-an-item
+    dialog, and once a slot is free the addon opens it for you. The contents cannot be seen in
+    advance, so it says *contents unknown* rather than pricing the container. Whatever lands in
+    your bags is listed with its value. On by default, switch in the settings.
 - **Junk-coin overlay**. Items *you* marked get a small coin in the bag slot's corner. Works with
   Bagnon and the default bags, and is purely additive: it never overwrites rarity borders.
 - **Vendor auto-sell** (opt-in, off by default). Sells only items you marked yourself and only

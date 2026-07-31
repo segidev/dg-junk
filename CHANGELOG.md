@@ -1,17 +1,26 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
-- **Container assist.** Right-clicking a clam, lockbox or pack with full bags used to fail with
-  "Inventory is full" and leave you to work out the rest yourself. It now opens the same
-  pick-an-item dialog the loot window uses, and once a slot is free it opens the container for you.
-  The container itself is never offered as the thing to delete, and it is re-checked right before
-  opening, so bags that shuffled in between cannot make it use the wrong item. Because what is
-  inside cannot be seen beforehand, the dialog says *contents unknown* rather than judging the
-  wrapper's own vendor price. If the contents need more than the one slot you freed, it asks again.
-  Contents that land straight in your bags are listed in chat with their value; contents that open a
-  loot window go through the normal loot verdicts instead. On by default, with its own switch in the
-  settings.
+Opening things with full bags.
+
+- **The container you are looting is never offered up.** Open a clam or a lockbox with full bags
+  and its contents wait in the loot window, while the container itself stays in your bag until you
+  take them. It is usually the cheapest thing you are carrying, so it was being recommended as the
+  item to destroy, which would have taken the contents with it. It is now held back for as long as
+  its loot window is open, and so is anything else the game has locked, since destroying a locked
+  item silently does nothing at all.
+- **No more phantom dialog over an open loot window.** The "inventory is full" that appears when a
+  container opens into full bags comes from auto-loot, not from the container failing, so the addon
+  no longer treats it as one. The loot window is in charge there and gives its usual keep-or-skip
+  verdicts on the contents.
+- **Container assist**, for containers that refuse to open at all because there is no room. You get
+  the same pick-an-item dialog the loot window uses, and once a slot is free the container is opened
+  for you. It is re-checked immediately beforehand, so bags that shuffled in between cannot make it
+  use the wrong item, and because the contents cannot be seen in advance the dialog says *contents
+  unknown* rather than pricing the wrapper. Need more than the one slot you freed and it simply asks
+  again. Whatever lands in your bags is then listed with its value. On by default, with its own
+  switch in the settings.
 - **Quest items no longer get priced.** A quest item is not a trade you can lose, so the comparison
   dialog stops telling you both of your candidates are too expensive for it. The cheaper of the two
   is still marked green as the one to give up, and the other is simply left neutral instead of
