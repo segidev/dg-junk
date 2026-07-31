@@ -121,7 +121,7 @@ locales.deDE = {
     ["worth it"]                         = "lohnt sich",
     ["not worth it"]                     = "lohnt sich nicht",
     ["recommended"]                      = "empfohlen",
-    ["costs more than the loot"]         = "teurer als die Beute",
+    ["costs more"]                       = "zu teuer",
     ["stacks, costs no bag slot"]        = "stapelbar, kostet keinen Taschenplatz",
     ["cheapest to discard %s"]           = "günstigster Verlust %s",
     ["Nothing to clear a slot"]          = "Nichts, um Platz zu schaffen",
@@ -1386,6 +1386,10 @@ local function BuildConfirm()
         b.ah:SetPoint("TOP", b.price, "BOTTOM", 0, -1)
         b.tag = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         b.tag:SetPoint("TOP", b.ah, "BOTTOM", 0, -1)
+        -- Same width as the name line above it. Without one the string renders at
+        -- its full length and the two slots' verdicts grow into each other; the
+        -- shorter wording alone would only push that out to the next translation.
+        b.tag:SetWidth(104); b.tag:SetJustifyH("CENTER")
         return b
     end
 
@@ -1598,7 +1602,7 @@ local function BuildConfirm()
                 if not questLoot and f.lworth and rec.value >= f.lworth then
                     -- paged up past the point where the trade pays off
                     b.SetBorder(0.85, 0.15, 0.15)
-                    b.tag:SetText(RED .. L["costs more than the loot"] .. "|r")
+                    b.tag:SetText(RED .. L["costs more"] .. "|r")
                 elseif b == best and rec == ((b == f.junkBtn) and jl[1] or ol[1]) then
                     b.SetBorder(0.1, 0.85, 0.2)
                     b.tag:SetText(GREEN .. L["recommended"] .. "|r")

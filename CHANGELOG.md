@@ -16,6 +16,9 @@
   dialog stops telling you both of your candidates are too expensive for it. The cheaper of the two
   is still marked green as the one to give up, and the other is simply left neutral instead of
   warned against. Everything that is not a quest item keeps the old red verdict.
+- Fixed: when both candidates in the comparison dialog were priced above the loot, their two red
+  verdicts grew into each other and overlapped. The wording is shorter now, and that line is held to
+  the same width as the item name above it, so a longer translation can no longer spill sideways.
 
 ## 1.2
 
