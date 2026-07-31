@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Container assist.** Right-clicking a clam, lockbox or pack with full bags used to fail with
+  "Inventory is full" and leave you to work out the rest yourself. It now opens the same
+  pick-an-item dialog the loot window uses, and once a slot is free it opens the container for you.
+  The container itself is never offered as the thing to delete, and it is re-checked right before
+  opening, so bags that shuffled in between cannot make it use the wrong item. Because what is
+  inside cannot be seen beforehand, the dialog says *contents unknown* rather than judging the
+  wrapper's own vendor price. If the contents need more than the one slot you freed, it asks again.
+  Contents that land straight in your bags are listed in chat with their value; contents that open a
+  loot window go through the normal loot verdicts instead. On by default, with its own switch in the
+  settings.
+
 ## 1.2
 
 The addon now speaks German, and the second icon got a clearer name.

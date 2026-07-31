@@ -26,7 +26,8 @@
     "LootSlotHasItem", "GetMerchantItemLink",
     "GetLootRollItemLink", "GetCursorPosition",
     "UnitName", "GetRealmName", "GetLocale", "IsShiftKeyDown", "IsControlKeyDown", "IsAltKeyDown",
-    "InCombatLockdown", "hooksecurefunc", "issecurevariable",
+    "InCombatLockdown", "hooksecurefunc", "issecurevariable", "GetTime",
+    "ERR_INV_FULL",
     "SlashCmdList", "SLASH_DGSJUNK1", "ReloadUI",
 
     "BACKPACK_CONTAINER", "NUM_BAG_FRAMES", "ITEM_QUALITY_COLORS",

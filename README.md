@@ -49,6 +49,10 @@ auction-house value. Hover for the item tooltip and the available actions.
   - Each item appears once, not once per bag slot, and you are offered its smallest stack.
   - **Right-click** an item to ignore it, **shift-right-click** to skip the menu. It drops out of
     the list and the next candidate takes its place.
+- **Container assist**. Right-clicking a clam, lockbox or pack that will not open because your bags
+  are full brings up that same dialog, and once you have freed a slot the addon opens the container
+  for you. If the contents land straight in your bags it then tells you what arrived and what it is
+  worth. Needs more than one slot? It simply asks again. On by default, switch in the settings.
 - **Junk-coin overlay**. Items *you* marked get a small coin in the bag slot's corner. Works with
   Bagnon and the default bags, and is purely additive: it never overwrites rarity borders.
 - **Vendor auto-sell** (opt-in, off by default). Sells only items you marked yourself and only
@@ -109,7 +113,7 @@ Loot-assist, debug logging and clearing the log are toggled inside that window
 
 ## Settings window
 
-- **Settings** (opens here), loot-assist, colour loot rows, suggest-by-AH, show item frames,
+- **Settings** (opens here), loot-assist, container assist, colour loot rows, suggest-by-AH, show item frames,
   always-show, minimap button, auto-sell, frame scale, the profile dropdown and its copy buttons,
   reset icon position.
 - **Ignored**, manage the ignore list (remove individual entries, or reset Junk / Normal / All).

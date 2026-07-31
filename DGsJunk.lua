@@ -138,6 +138,20 @@ locales.deDE = {
     ["no junk"]                          = "kein Plunder",
     ["no normal item"]                   = "kein normaler Gegenstand",
 
+    -- container assist
+    ["Bags full - click a junk/item to delete, then it opens:"] =
+        "Taschen voll, klicke einen Gegenstand zum Löschen, dann wird geöffnet:",
+    ["delete this and open"]             = "dies löschen und öffnen",
+    ["contents unknown"]                 = "Inhalt unbekannt",
+    ["cleared to open:"]                 = "gelöscht zum Öffnen:",
+    ["that container is gone - nothing was opened."] =
+        "dieser Behälter ist nicht mehr da, es wurde nichts geöffnet.",
+    ["your bags are full and there is nothing cheap enough to delete."] =
+        "deine Taschen sind voll und es gibt nichts Günstiges genug zum Löschen.",
+    ["no slot was freed - the container was not opened."] =
+        "es wurde kein Platz frei, der Behälter wurde nicht geöffnet.",
+    ["opened: %s"]                       = "geöffnet: %s",
+
     -- settings window: tabs
     ["Ignored"]                          = "Ignoriert",
     ["Debug"]                            = "Debug",
@@ -172,6 +186,9 @@ locales.deDE = {
     ["Loot-assist"]                      = "Beute-Assistent",
     ["Shift-click a loot item with full bags to choose what to delete, then loot it"] =
         "Umschalt-Klick auf Beute bei vollen Taschen: erst wählen, was gelöscht wird, dann wird geplündert",
+    ["Container assist"]                 = "Behälter-Assistent",
+    ["Opening a clam, box or pack with full bags offers what to delete, then opens it for you"] =
+        "Beim Öffnen einer Muschel, Kiste oder eines Pakets mit vollen Taschen wird angeboten, was gelöscht wird, danach wird geöffnet",
     ["Colour loot rows"]                 = "Beutezeilen einfärben",
     ["Tints the loot window green (worth more than the cheapest thing you would delete) or red (skip it), only while your bags are full"] =
         "Färbt das Beutefenster grün (mehr wert als das Günstigste, was du löschen würdest) oder rot (liegen lassen), nur bei vollen Taschen",
@@ -304,6 +321,10 @@ local Update, BuildConfig, RefreshConfig       -- fwd decls
 local RefreshBagOverlays                       -- fwd decl (bag junk-coin overlay)
 local RefreshJunkList                          -- fwd decl (Junk-clear tab)
 local LootClearCandidates                      -- fwd decl (defined in the loot-assist section)
+local suppressUseHook = false                  -- set around our own UseContainerItem calls
+                                               -- (container assist reads it; auto-sell sets it)
+local lootSource                               -- bag slot the open loot window came out of, if any
+                                               -- (a container being looted: never offer it up)
 local config                                   -- settings frame (built lazily)
 
 -- While a frame of ours is being dragged the cursor sweeps across the other
@@ -350,6 +371,22 @@ local function SlotCount(bag, slot)
     return count or 1
 end
 
+-- A bag slot that cannot be given up right now.
+--
+-- Two ways that happens. The client locks a slot while the server is busy with
+-- it, and PickupContainerItem on a locked slot does nothing - offering one means
+-- offering a delete that silently fails. And the item whose loot window is
+-- currently open is the SOURCE of that loot: destroying a clam to make room for
+-- its own Clam Meat would take the meat with it, which is the one trade this
+-- addon must never propose. `lootSource` is set while such a window is open.
+local function SlotUndeletable(bag, slot)
+    if lootSource and lootSource.bag == bag and lootSource.slot == slot then return "loot source" end
+    local t, _, locked = GetContainerItemInfo(bag, slot)
+    if type(t) == "table" then locked = t.isLocked end
+    if locked then return "locked" end
+    return nil
+end
+
 -- Auctionator is optional. Everything AH-related degrades to vendor prices when
 -- it is missing; the "Suggest by AH" checkbox greys itself out (see Check()).
 local function HasAuctionator()
@@ -390,6 +427,7 @@ local function ScanBags()
             local id = GetContainerItemID(bag, slot)
             -- quest items are never suggested, even if marked as junk
             if id and not exclusions[id] and not IsQuestItem(id)
+               and not SlotUndeletable(bag, slot)
                and not (DB and DB.ignore and DB.ignore[id]) then
                 local value, each, worthEach = Worth(id, SlotCount(bag, slot))
                 if value then
@@ -958,7 +996,12 @@ local function AutoSellMarked()
                         local b, s = bag, slot
                         C_Timer.After(delay, function()
                             if MerchantFrame and MerchantFrame:IsShown() then
+                                -- A sale is not the player reaching for a
+                                -- container, so it must not arm the container
+                                -- assist's "what did you just use" memory.
+                                suppressUseHook = true
                                 pcall(function() UseContainerItem(b, s) end)
+                                suppressUseHook = false
                             end
                         end)
                         delay = delay + 0.25            -- one item per 0.25s: no "too fast" throttling
@@ -1167,6 +1210,7 @@ LootClearCandidates = function()
             local id = GetContainerItemID(bag, slot)
             -- quest items are never offered for deletion, even if marked as junk
             if id and not exclusions[id] and not IsQuestItem(id)
+               and not SlotUndeletable(bag, slot)
                and not (DB and DB.ignore and DB.ignore[id]) then
                 local _, _, q = GetItemInfo(id)
                 if q and q <= COMMON then
@@ -1258,6 +1302,10 @@ end
 -- despawned, someone else took it) the slot is gone, so the dialog must go too -
 -- otherwise a click deletes an item and loots nothing.
 local function CloseLootConfirm()
+    -- Only the LOOT dialog is tied to the loot window. The container dialog uses
+    -- the same frame but its target is a bag slot, so a loot window closing
+    -- somewhere else must not pull it out from under the player.
+    if confirmFrame and confirmFrame.clearAction then return end
     if confirmFrame and confirmFrame:IsShown() then confirmFrame:Hide() end
 end
 local function BuildConfirm()
@@ -1372,7 +1420,8 @@ local function BuildConfirm()
         -- everywhere: what a click does is never a thing you have to discover.
         if hints and self.rec then
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff33ff99" .. L["Left-click"] .. "|r|cff888888 " .. L["delete this and loot"] .. "|r")
+            GameTooltip:AddLine("|cff33ff99" .. L["Left-click"] .. "|r|cff888888 " ..
+                (f.hintAction or L["delete this and loot"]) .. "|r")
             GameTooltip:AddLine("|cffff8800" .. L["Shift-right-click"] .. "|r|cff888888 " .. L["ignore"] .. "|r")
             GameTooltip:AddLine("|cffffcc55" .. L["Right-click"] .. "|r|cff888888 " .. L["for menu"] .. "|r")
             if #listFor(self.which) > 1 then
@@ -1464,7 +1513,11 @@ local function BuildConfirm()
                 if f.SyncLists then f.SyncLists() end
                 return
             end
-            f:Hide(); DoLootClear(self.rec, f.slot)
+            f:Hide()
+            -- The dialog is target-agnostic from here on: the loot path deletes
+            -- and loots, the container path deletes and re-opens. Everything
+            -- above (ranking, staleness re-check, preview guard) is shared.
+            if f.clearAction then f.clearAction(self.rec) else DoLootClear(self.rec, f.slot) end
         end)
     end
 
@@ -1552,7 +1605,13 @@ local function BuildConfirm()
         -- CHEAPEST stack you would have to destroy. Paging does not move it, or
         -- the dialog and the tooltip would start contradicting each other.
         local lo = math.min(rj, ro)
-        if f.lid and IsQuestItem(f.lid) then
+        if f.lootVerdict then
+            -- A container's contents are not visible before it is opened, so
+            -- there is no honest worth to compare. Judging the wrapper's own
+            -- vendor price would answer a question nobody asked.
+            f.lootBtn.SetBorder(0.3, 0.3, 0.3)
+            f.lootBtn.tag:SetText(GREY .. f.lootVerdict .. "|r")
+        elseif f.lid and IsQuestItem(f.lid) then
             f.lootBtn.SetBorder(0.1, 0.85, 0.2)
             f.lootBtn.tag:SetText(GREEN .. L["quest - take it"] .. "|r")
         elseif f.lworth and lo < math.huge then
@@ -1634,6 +1693,10 @@ end
 local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkList, otherList, lootCount)
     local f = confirmFrame or BuildConfirm()
     f.slot = slot
+    -- The frame is reused by the container path, which sets these. A loot dialog
+    -- opening afterwards must not inherit them, or it would delete for a
+    -- container that is long gone.
+    f.clearAction, f.lootVerdict, f.hintAction = nil, nil, nil
     f.preview = preview and true or false
     previewMode = f.preview
     -- A preview is deliberately INDISTINGUISHABLE from the real dialog: same
@@ -1783,6 +1846,295 @@ local function PreviewToggle()
 end
 
 local hookedButtons = {}
+------------------------------------------------ container assist (full bags)
+-- Right-clicking a clam, lockbox or pack with full bags is refused with
+-- "Inventory is full" and nothing else happens: no suggestion of what to
+-- destroy, no verdict on what would have arrived. That is the same decision the
+-- loot dialog already solves, so this reaches it from a container.
+--
+-- There is no pre-click hook on a bag item, and Bagnon owns the bag buttons, so
+-- the flow is necessarily: fail -> dialog -> free a slot -> open again. The
+-- failure IS the trigger. Two independent facts identify the container without
+-- ever guessing at it:
+--   * hooksecurefunc on UseContainerItem records which bag slot was just used
+--     (Blizzard's own bag buttons and Bagnon's both route through it), and
+--   * UI_ERROR_MESSAGE / ERR_INV_FULL says that use was refused for space.
+-- Only when both land within a second of each other do we say anything.
+local CONTAINER_USE_WINDOW = 1.5      -- seconds a use stays "the thing that just failed"
+local CONTAINER_DIFF_WINDOW = 6       -- how long after our open a bag change counts as its contents
+local lastUse                         -- { bag, slot, id, t } of the most recent player-driven use
+local pendingOpen, bagSnapshot        -- armed while we wait for a container's contents
+-- (suppressUseHook is declared at the top: auto-sell sets it, and that runs first)
+
+-- Item counts across the normal bags, keyed by item id. Diffing two of these is
+-- the only reliable way to see what a container put into the bags: contents that
+-- land directly (clams, most packs) fire no loot event at all, and CHAT_MSG_LOOT
+-- would be locale fragile and misses stacks merging into ones you already carry.
+local function BagCounts()
+    local t = {}
+    for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
+        for slot = 1, (GetContainerNumSlots(bag) or 0) do
+            local id = GetContainerItemID(bag, slot)
+            if id then t[id] = (t[id] or 0) + (SlotCount(bag, slot) or 1) end
+        end
+    end
+    return t
+end
+
+local function RecordUse(bag, slot)
+    if suppressUseHook then return end
+    if type(bag) ~= "number" or type(slot) ~= "number" then return end
+    local id = GetContainerItemID(bag, slot)
+    -- The hook runs after the call but before the server answers, so the item is
+    -- still sitting in the slot - which is exactly what we need to name it.
+    if not id then return end
+    lastUse = { bag = bag, slot = slot, id = id, t = GetTime() }
+    -- Logged even though most uses are not containers at all: if a right-click
+    -- ever fails to reach this hook, its ABSENCE here is the only evidence, and
+    -- an absent line is only readable when the present ones are reliable.
+    dbg("use: item", id, "at bag", bag, "slot", slot)
+end
+if C_Container and C_Container.UseContainerItem then
+    hooksecurefunc(C_Container, "UseContainerItem", RecordUse)
+elseif _G.UseContainerItem then
+    hooksecurefunc("UseContainerItem", RecordUse)
+end
+
+local function OpenContainer(cont)
+    -- Bags shuffle. Opening by stale coordinates would use whatever landed there
+    -- instead, and "it used my scroll" is not a mistake this addon gets to make.
+    if GetContainerItemID(cont.bag, cont.slot) ~= cont.id then
+        dbg("container: bag", cont.bag, "slot", cont.slot, "no longer holds", cont.id, "- not opening")
+        print(GOLD .. "DGs Junk|r " .. L["that container is gone - nothing was opened."])
+        return
+    end
+    bagSnapshot = BagCounts()
+    pendingOpen = { id = cont.id, t = GetTime() }
+    dbg("container: opening", cont.id, "at bag", cont.bag, "slot", cont.slot)
+    -- Deliberately NOT suppressed from the use hook: if the contents need more
+    -- than the one slot we just freed, the second refusal re-arms the whole flow
+    -- and the player is simply asked once more. That is the multi-delete case,
+    -- and it costs nothing but letting our own call be recorded.
+    pcall(UseContainerItem, cont.bag, cont.slot)
+end
+
+-- Deleting is a server round trip, and a non-gray delete puts Blizzard's own
+-- confirm in between, so there is no fixed delay that is right. Wait for the
+-- slot to actually exist instead, and give up rather than open into full bags.
+local function OpenWhenRoom(cont, tries)
+    tries = (tries or 0) + 1
+    if not BagsFull() then
+        -- How long the slot took to appear separates "the delete was instant"
+        -- from "Blizzard's confirm popup sat in the way", which look identical
+        -- from the outside and fail differently.
+        dbg("container: slot free after", tries, "check(s) - opening")
+        OpenContainer(cont)
+        return
+    end
+    if tries > 12 or not C_Timer then                       -- ~3s
+        dbg("container: no slot freed after", tries, "tries - giving up")
+        print(GOLD .. "DGs Junk|r " .. L["no slot was freed - the container was not opened."])
+        return
+    end
+    C_Timer.After(0.25, function() OpenWhenRoom(cont, tries) end)
+end
+
+local function DoContainerClear(rec, cont)
+    if not rec or not cont then return end
+    if previewMode then dbg("preview: container-clear suppressed"); return end
+    -- Destroying the container in order to open it is not a trade anyone wants.
+    if rec.bag == cont.bag and rec.slot == cont.slot then
+        dbg("container-clear aborted: the candidate IS the container")
+        return
+    end
+    if GetContainerItemID(cont.bag, cont.slot) ~= cont.id then
+        dbg("container-clear aborted: container", cont.id, "left bag", cont.bag, "slot", cont.slot)
+        print(GOLD .. "DGs Junk|r " .. L["that container is gone - nothing was opened."])
+        return
+    end
+    DeleteRecord(rec, "cleared to open:")
+    OpenWhenRoom(cont)
+    if C_Timer then C_Timer.After(0.6, Update) end
+end
+
+-- Candidates minus one exact bag slot: the container being opened is in the bags
+-- too, and if it is a gray it would otherwise be offered as the thing to delete.
+-- Only that one slot is dropped - deleting your second clam to open your first
+-- is a perfectly good trade.
+local function WithoutSlot(list, bag, slot)
+    local out = {}
+    for _, rec in ipairs(list or {}) do
+        if not (rec.bag == bag and rec.slot == slot) then out[#out + 1] = rec end
+    end
+    return out
+end
+
+local function ShowContainerConfirm(cont, junkList, otherList, preview)
+    local link = select(2, GetItemInfo(cont.id)) or L["this item"]
+    ShowLootConfirm(link, junkList[1], otherList[1], nil, preview, junkList, otherList, 1)
+    local f = confirmFrame
+    f.head:SetText(L["Bags full - click a junk/item to delete, then it opens:"])
+    -- No worth is known for what is inside, so nothing on this dialog may claim
+    -- one: the left-hand verdict says so, and clearing lworth stops the
+    -- candidates being painted red against the wrapper's own vendor price.
+    f.lworth = nil
+    f.lootVerdict = L["contents unknown"]
+    f.hintAction = L["delete this and open"]
+    f.clearAction = function(rec) DoContainerClear(rec, cont) end
+    f.RenderCandidates()
+end
+
+local function InvFullError()
+    if DB and DB.containerAssist == false then return end
+    if previewMode then return end
+    local u = lastUse
+    if not u or (GetTime() - u.t) > CONTAINER_USE_WINDOW then
+        dbg("inv-full: no bag item was used just now - not ours")
+        return
+    end
+    if GetContainerItemID(u.bag, u.slot) ~= u.id then
+        dbg("inv-full: bag", u.bag, "slot", u.slot, "no longer holds", u.id, "- ignoring")
+        return
+    end
+    -- A loot window is open, so nothing was refused for want of a slot: the
+    -- container DID open and it is auto-loot that could not fit. Two things make
+    -- this indistinguishable from a real failure without the check - the error is
+    -- the same, and a loot-window container is not consumed until its contents
+    -- are taken, so it is still sitting in the bag slot the guard above accepts.
+    -- The loot path owns this case; it already judges and tints every row.
+    if (GetNumLootItems and GetNumLootItems() or 0) > 0 then
+        dbg("inv-full: a loot window is open - this is auto-loot, not a container that failed to open")
+        return
+    end
+    if confirmFrame and confirmFrame:IsShown() then
+        dbg("inv-full: dialog already open - ignoring")
+        return
+    end
+    -- The server said the inventory is full, and the server is the authority
+    -- here: BagsFull() is only logged, never used to overrule it (a free slot in
+    -- a profession bag is not a slot a clam's contents can use).
+    local _, _, junkList, otherList = LootClearCandidates()
+    junkList  = WithoutSlot(junkList,  u.bag, u.slot)
+    otherList = WithoutSlot(otherList, u.bag, u.slot)
+    dbg("inv-full: container", u.id, "at bag", u.bag, "slot", u.slot,
+        "| BagsFull()=" .. tostring(BagsFull()),
+        "| junk=" .. #junkList, "other=" .. #otherList)
+    if #junkList == 0 and #otherList == 0 then
+        dbg("inv-full: nothing deletable - no dialog")
+        print(GOLD .. "DGs Junk|r " .. L["your bags are full and there is nothing cheap enough to delete."])
+        return
+    end
+    ShowContainerConfirm({ bag = u.bag, slot = u.slot, id = u.id }, junkList, otherList)
+end
+
+-- Debug: the container dialog without first filling the bags to exactly zero
+-- free slots and then finding a clam. It dresses the live dialog through the
+-- very same call InvFullError() makes, so what you are looking at is the real
+-- thing; only previewMode (set by ShowLootConfirm) keeps the clicks inert.
+local function PreviewContainerConfirm()
+    local _, _, junkList, otherList = LootClearCandidates()
+    -- Any bag item stands in for the container: the dialog never looks inside
+    -- one, it only shows its name, icon and vendor price.
+    local cont
+    for bag = BACKPACK_CONTAINER, NUM_BAG_FRAMES do
+        for slot = 1, (GetContainerNumSlots(bag) or 0) do
+            local id = GetContainerItemID(bag, slot)
+            local head = (junkList[1] and junkList[1].bag == bag and junkList[1].slot == slot)
+                      or (otherList[1] and otherList[1].bag == bag and otherList[1].slot == slot)
+            if id and not head and not cont then cont = { bag = bag, slot = slot, id = id } end
+        end
+    end
+    if not cont then
+        print(GOLD .. "DGs Junk|r " .. L["preview: no usable items in your bags."])
+        return
+    end
+    dbg("preview: container dialog, standing in for a container:", cont.id,
+        "at bag", cont.bag, "slot", cont.slot,
+        "| junk=" .. #junkList, "other=" .. #otherList)
+    ShowContainerConfirm(cont, WithoutSlot(junkList, cont.bag, cont.slot),
+                               WithoutSlot(otherList, cont.bag, cont.slot), true)
+end
+
+-- A container that opens a LOOT WINDOW has put nothing in the bags, and the loot
+-- path takes over from here. Disarming means a later bag change - looting it,
+-- picking anything else up - is never reported as this container's contents. The
+-- log line also answers the question a test session actually has about a given
+-- container: which of the two kinds is it?
+local function ContainerOpenedLootWindow()
+    -- If this window came out of a bag item, that item is the loot's source and
+    -- has to be taken off the table until the window closes: it is still sitting
+    -- in the bag (a container is consumed only once its contents are taken), it
+    -- is the cheapest thing there by construction, and destroying it would take
+    -- the loot with it. Recorded from the same use hook the assist runs on.
+    --
+    -- Note it is only taken off the DELETE list, not treated as free room. The
+    -- slot it occupies does come back the moment the loot is taken, so it looks
+    -- like the contents could simply move into it - but the server grants the
+    -- item before consuming the container, so looting into otherwise full bags
+    -- fails with the same error (verified in game, 1.15.9). The advice to free
+    -- an unrelated slot is therefore correct, not over-cautious.
+    local u = lastUse
+    if u and (GetTime() - u.t) <= CONTAINER_USE_WINDOW and GetContainerItemID(u.bag, u.slot) == u.id then
+        lootSource = { bag = u.bag, slot = u.slot, id = u.id }
+        dbg("loot source: item", u.id, "at bag", u.bag, "slot", u.slot,
+            "- not offered while its loot window is open")
+    end
+
+    -- A container dialog still on screen is now provably wrong: the container it
+    -- offers to make room for is open, its contents are in the loot window, and
+    -- clicking would destroy something and then re-use an already-opened item.
+    -- This is the other half of the loot-window guard in InvFullError, for the
+    -- ordering where the refusal arrives before there is a window to see.
+    if confirmFrame and confirmFrame:IsShown() and confirmFrame.clearAction and not confirmFrame.preview then
+        dbg("container: loot window opened - the container did open, closing the container dialog")
+        confirmFrame.clearAction = nil        -- CloseLootConfirm() steps aside for container dialogs
+        confirmFrame:Hide()
+    end
+    if not pendingOpen then return end
+    dbg("container:", pendingOpen.id, "opened a loot window - the loot path takes it from here")
+    pendingOpen, bagSnapshot = nil, nil
+end
+
+-- What actually arrived. Only runs while an open of ours is armed, and only for
+-- contents that landed straight in the bags: anything that opens a loot window
+-- goes through the loot path instead, which already tints and judges every row.
+local function ContainerContentsVerdict()
+    if not (pendingOpen and bagSnapshot) then return end
+    if (GetTime() - pendingOpen.t) > CONTAINER_DIFF_WINDOW then
+        dbg("container: nothing landed in the bags within", CONTAINER_DIFF_WINDOW .. "s (loot window?)")
+        pendingOpen, bagSnapshot = nil, nil
+        return
+    end
+    local now, lines, total = BagCounts(), {}, 0
+    for id, n in pairs(now) do
+        local gained = n - (bagSnapshot[id] or 0)
+        -- The container itself is consumed by opening: that is a loss, and a
+        -- container that yields more of itself is not worth the special case.
+        if gained > 0 and id ~= pendingOpen.id then
+            local value = Worth(id, gained) or 0
+            total = total + value
+            local link = select(2, GetItemInfo(id)) or fmt(L["Item #%d"], id)
+            lines[#lines + 1] = link .. ((gained > 1) and (" x" .. gained) or "") ..
+                " " .. GREY .. "(" .. Coin(value) .. ")|r"
+        end
+    end
+    -- The container leaving its own slot is a bag change too, so an empty diff is
+    -- normal and we keep waiting. Said once per open: on every bag update it
+    -- would bury the line that matters.
+    if #lines == 0 then
+        if not pendingOpen.waited then
+            pendingOpen.waited = true
+            dbg("container: bags changed, nothing new in them yet - still waiting")
+        end
+        return
+    end
+    pendingOpen, bagSnapshot = nil, nil
+    print(GOLD .. "DGs Junk|r " .. fmt(L["opened: %s"], table.concat(lines, ", ")) ..
+        " " .. GREY .. "= " .. Coin(total) .. "|r")
+    dbg("container diff:", #lines, "item(s), total", total .. "c",
+        "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
+end
+
 local function LootAssistClick(self)
     if DB and DB.lootAssist == false then return end
     if not IsShiftKeyDown() then return end
@@ -2053,8 +2405,28 @@ ev:RegisterEvent("MERCHANT_SHOW")
 ev:RegisterEvent("LOOT_OPENED")
 ev:RegisterEvent("LOOT_SLOT_CLEARED")
 ev:RegisterEvent("LOOT_CLOSED")
-ev:SetScript("OnEvent", function(_, event, arg1)
+ev:RegisterEvent("UI_ERROR_MESSAGE")
+ev:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if event == "UI_ERROR_MESSAGE" then
+        -- (errorType, message). The numeric type shifts between builds, so the
+        -- global string is what we match; it is already in the client's locale.
+        local msg = arg2 or arg1
+        if msg == ERR_INV_FULL then
+            InvFullError()
+        elseif lastUse and (GetTime() - lastUse.t) <= CONTAINER_USE_WINDOW then
+            -- A refusal right after a bag click that we did NOT recognise. Worth
+            -- a log line: if a container ever fails with a different message,
+            -- this is the only place it would show up.
+            dbg("ui-error after a bag use, not ERR_INV_FULL:", tostring(msg))
+        end
+        return
+    end
     if event == "LOOT_OPENED" then
+        -- Unconditional, unlike the per-button hook lines, which only appear the
+        -- first time each button is seen: without this a loot window that opened
+        -- for the second time leaves no trace at all.
+        dbg("loot window opened:", (GetNumLootItems and GetNumLootItems()) or 0, "item(s)")
+        ContainerOpenedLootWindow()
         HookLootButtons()
         HookLootUpdate()
         ColorLootRowsSoon()           -- after Blizzard has laid the rows out
@@ -2065,6 +2437,10 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         return
     end
     if event == "LOOT_CLOSED" then
+        if lootSource then
+            dbg("loot source: cleared (loot window closed)")
+            lootSource = nil          -- the container is deletable again, or already gone
+        end
         CloseLootConfirm()            -- the loot slot is gone; the dialog would lie
         return
     end
@@ -2074,6 +2450,9 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     end
     if event == "BAG_UPDATE_DELAYED" and LootFrame and LootFrame:IsShown() then
         ColorLootRowsSoon()           -- bags just filled up / freed up: re-judge
+    end
+    if event == "BAG_UPDATE_DELAYED" then
+        ContainerContentsVerdict()    -- no-op unless we opened something just now
     end
     if event == "BAG_UPDATE_DELAYED" and confirmFrame and confirmFrame:IsShown() then
         if confirmFrame.SyncLists then confirmFrame.SyncLists() end   -- keep candidates off stale bag slots
@@ -2126,6 +2505,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         DB.marks  = DB.profiles.Main.marks
         if DB.alwaysShow == nil then DB.alwaysShow = true end   -- default ON
         if DB.autoSell == nil then DB.autoSell = false end       -- vendor auto-sell of marked items (opt-in)
+        if DB.containerAssist == nil then DB.containerAssist = true end   -- full-bag container opening
         if DB.devMode == nil then DB.devMode = false end         -- Debug tab is hidden until /dgjunk dev
         DB.scale = DB.scale or 1
         if DB.minimap == nil then DB.minimap = true end          -- minimap button on by default
@@ -2611,6 +2991,10 @@ BuildConfig = function()
         function() return DB.lootAssist ~= false end,
         function(v) DB.lootAssist = v end,
         "Shift-click a loot item with full bags to choose what to delete, then loot it")
+    config.checks.container = Check("Container assist",
+        function() return DB.containerAssist ~= false end,
+        function(v) DB.containerAssist = v end,
+        "Opening a clam, box or pack with full bags offers what to delete, then opens it for you")
     config.checks.lootColor = Check("Colour loot rows",
         function() return DB.lootColor ~= false end,
         function(v) DB.lootColor = v; ColorLootRows() end,
@@ -3148,6 +3532,13 @@ SlashCmdList.DGSJUNK = function(msg)
             return
         end
         if not config then BuildConfig() end     -- the Debug tab owns the label sync
+        -- "/dgjunk preview container" shows the container variant of the same
+        -- dialog. Filling the bags to exactly zero free slots and then finding a
+        -- clam is a lot of work to look at a header, so this exists.
+        if (msg or ""):lower():match("^%s*%S+%s+container") then
+            PreviewContainerConfirm()
+            return
+        end
         PreviewToggle()
         return
     end
