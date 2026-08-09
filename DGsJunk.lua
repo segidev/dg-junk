@@ -120,7 +120,7 @@ locales.deDE = {
     ["quest - take it"]                  = "Quest, mitnehmen",
     ["worth it"]                         = "lohnt sich",
     ["not worth it"]                     = "lohnt sich nicht",
-    ["recommended"]                      = "empfohlen",
+    ["delete this"]                      = "das hier löschen",
     ["costs more"]                       = "zu teuer",
     ["stacks, costs no bag slot"]        = "stapelbar, kostet keinen Taschenplatz",
     ["cheapest to discard %s"]           = "günstigster Verlust %s",
@@ -480,6 +480,12 @@ end
 
 -------------------------------------------------------------------- formatting
 local GREEN, RED, GREY, GOLD = "|cff33ff99", "|cffff4040", "|cff888888", "|cffffcc55"
+
+-- Marker drawn on the slot the comparison dialog wants destroyed. This is the
+-- group-loot Pass button: a red X that Classic Era definitely ships, chosen over
+-- a guessed trashcan path because a missing texture renders as a blank square
+-- and would silently remove the marker instead of failing loudly.
+local TRASH_TEX = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
 
 -- debug logging: prints to chat AND appends to DB.log (saved to disk on /reload,
 -- so it can be read from WTF\...\SavedVariables\DGsJunk.lua). Toggle: Log tab.
@@ -1404,6 +1410,17 @@ local function BuildConfirm()
         b.SetBorder(0.3, 0.3, 0.3)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetAllPoints(); b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        -- Delete marker, top-right corner, only on the slot the dialog is telling
+        -- you to destroy. The red border alone was ambiguous: this column's red
+        -- also has to say "do NOT delete this one" when you page past the point
+        -- where the trade pays off, so the border cannot carry the meaning by
+        -- itself. Corner rather than centred - it must not hide the item art you
+        -- are about to throw away.
+        b.trash = b:CreateTexture(nil, "OVERLAY")
+        b.trash:SetSize(18, 18)
+        b.trash:SetPoint("TOPRIGHT", b, "TOPRIGHT", 4, 4)
+        b.trash:SetTexture(TRASH_TEX)
+        b.trash:Hide()
         b.cap = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         b.cap:SetPoint("BOTTOM", b, "TOP", 0, 3); b.cap:SetText(cap)
         b.capBase = cap                     -- the paging counter is appended to this
@@ -1574,6 +1591,7 @@ local function BuildConfirm()
             b.price:SetText("")
             b.ah:SetText("")
             b.tag:SetText("")
+            b.trash:Hide()
             b.SetBorder(0.3, 0.3, 0.3)      -- same neutral border as a filled slot
             return
         end
@@ -1593,6 +1611,7 @@ local function BuildConfirm()
         local ahEach = AHPrice(rec.id)
         b.ah:SetText((ahEach and ahEach > 0) and (GREY .. L["AH:"] .. "|r " .. Coin(ahEach * cnt)) or "")
         b.tag:SetText("")
+        b.trash:Hide()
         b.SetBorder(0.3, 0.3, 0.3)
     end
 
@@ -1631,13 +1650,21 @@ local function BuildConfirm()
         for _, b in ipairs({ f.junkBtn, f.otherBtn }) do
             local rec = b.rec
             if rec then
+                -- Colour means ACTION here, not "good for you": red plus the bin
+                -- is the slot to destroy, the way a Delete button is red. That
+                -- leaves nothing for the older red-means-warning state, so the
+                -- item you paged past keeps its red WORDS and drops back to a
+                -- neutral border - two different reds around the icon, one
+                -- saying "click me" and one saying "don't", is the exact
+                -- confusion this whole change is fixing.
                 if not questLoot and f.lworth and rec.value >= f.lworth then
                     -- paged up past the point where the trade pays off
-                    b.SetBorder(0.85, 0.15, 0.15)
+                    b.SetBorder(0.3, 0.3, 0.3)
                     b.tag:SetText(RED .. L["costs more"] .. "|r")
                 elseif b == best and rec == ((b == f.junkBtn) and jl[1] or ol[1]) then
-                    b.SetBorder(0.1, 0.85, 0.2)
-                    b.tag:SetText(GREEN .. L["recommended"] .. "|r")
+                    b.SetBorder(0.85, 0.15, 0.15)
+                    b.trash:Show()
+                    b.tag:SetText(RED .. L["delete this"] .. "|r")
                 end
             end
         end
