@@ -192,11 +192,14 @@ locales.deDE = {
     ["Colour loot rows"]                 = "Beutezeilen einfärben",
     ["Tints the loot window green (worth more than the cheapest thing you would delete) or red (skip it), only while your bags are full"] =
         "Färbt das Beutefenster grün (mehr wert als das Günstigste, was du löschen würdest) oder rot (liegen lassen), nur bei vollen Taschen",
-    ["Suggest by AH prices"]             = "Nach AH-Preisen vorschlagen",
-    ["Rank by Auctionator AH value instead of vendor (falls back to vendor)"] =
-        "Nach Auctionator-AH-Wert statt Händlerpreis bewerten (fällt auf den Händlerpreis zurück)",
-    ["Requires Auctionator (not installed / not detected) - ranking uses vendor prices"] =
-        "Benötigt Auctionator (nicht installiert / nicht erkannt), die Bewertung nutzt Händlerpreise",
+    ["Price basis"]                      = "Preisgrundlage",
+    ["Best of both"]                     = "Bestes aus beidem",
+    ["Vendor only"]                      = "Nur Händler",
+    ["AH only"]                          = "Nur Auktionshaus",
+    ["What the recommendation is worth-ranked by. Best of both takes whichever of vendor and AH price is higher for each item - what you could actually get for it."] =
+        "Wonach die Empfehlung bewertet wird. Bestes aus beidem nimmt pro Gegenstand den höheren von Händler- und AH-Preis, also das, was du wirklich dafür bekommen würdest.",
+    ["Requires Auctionator (not installed / not detected) - the recommendation uses vendor prices"] =
+        "Benötigt Auctionator (nicht installiert / nicht erkannt), die Empfehlung nutzt Händlerpreise",
     ["Show item frames"]                 = "Gegenstandsfenster anzeigen",
     ["Master toggle - same as left-clicking the minimap icon"] =
         "Hauptschalter, wie ein Linksklick auf das Minikartensymbol",
@@ -399,21 +402,50 @@ local function AHPrice(itemID)
     end
 end
 
--- Real worth for ranking/compare. worthEach = per-item value (AH when "Suggest
--- by AH" is on and data exists, else vendor sell price). Returns:
+-- Which price the recommendation is computed from:
+--   "vendor" - vendor sell price only (the default). Needs no Auctionator data
+--              and matches what most players actually do with bag clutter.
+--   "best"   - whichever of vendor / AH is higher, per item. You choose per item
+--              where a thing gets sold, so its real worth is the better of the
+--              two channels; the lower number must never decide.
+--   "ah"     - AH value, vendor only as the fallback when there is no AH price
+-- Every mode degrades to vendor prices when Auctionator is missing.
+-- The order here is the order of the settings dropdown, and the no-menu-API
+-- fallback cycles through it: "vendor" first because it is the default.
+local PRICE_MODES = {
+    { key = "vendor", label = "Vendor only" },
+    { key = "best",   label = "Best of both" },
+    { key = "ah",     label = "AH only" },
+}
+
+local function PriceMode()
+    local m = DB and DB.priceMode
+    if m == "best" or m == "ah" then return m end
+    return "vendor"
+end
+
+-- Real worth for ranking/compare. worthEach = per-item value under the basis
+-- above. Returns:
 --   totalValue - worthEach * count (rank/sort by this: least valuable stack first)
 --   vendorEach - per-item vendor sell price (for the icon's Vendor line)
---   worthEach  - per-item value actually used (AH each, or vendor each)
+--   worthEach  - per-item value actually used
+--   source     - "vendor" or "ah", whichever produced worthEach
 local function Worth(id, count)
     local stackMax, _, _, price = select(8, GetItemInfo(id))   -- 8=stackMax .. 11=sellPrice
     if not stackMax then return nil end                        -- item info not cached yet
     local vendorEach = price or 0
-    local worthEach = vendorEach
-    if DB and DB.ahSuggest then
+    local worthEach, source = vendorEach, "vendor"
+    local mode = PriceMode()
+    if mode ~= "vendor" then
         local ah = AHPrice(id)
-        if ah and ah > 0 then worthEach = ah end
+        -- "ah" takes the auction number outright; "best" only lets it win when it
+        -- actually beats the vendor, so an underpriced auction can never talk you
+        -- into destroying the item that was worth more at the merchant.
+        if ah and ah > 0 and (mode == "ah" or ah > vendorEach) then
+            worthEach, source = ah, "ah"
+        end
     end
-    return worthEach * (count or 1), vendorEach, worthEach
+    return worthEach * (count or 1), vendorEach, worthEach, source
 end
 
 -- Single bag scan -> cheapest junk item, and cheapest qualifying non-junk item.
@@ -1271,7 +1303,7 @@ LootClearCandidates = function()
     if summary ~= lastCandidateSummary then
         lastCandidateSummary = summary
         dbg("candidates:", summary,
-            "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
+            "| basis=" .. PriceMode())
     end
     return junkList[1], otherList[1], junkList, otherList
 end
@@ -1763,7 +1795,7 @@ local function ShowLootConfirm(lootLink, junkRec, otherRec, slot, preview, junkL
         "ah=" .. tostring(lah or 0) .. "c",
         "| lists junk=" .. #f.junkList, "other=" .. #f.otherList,
         "| lootSlot=" .. tostring(slot),
-        "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
+        "| basis=" .. PriceMode())
     f.RenderCandidates()
     f:Show()
 end
@@ -2143,7 +2175,7 @@ local function ContainerContentsVerdict()
     print(GOLD .. "DGs Junk|r " .. fmt(L["opened: %s"], table.concat(lines, ", ")) ..
         " " .. GREY .. "= " .. Coin(total) .. "|r")
     dbg("container diff:", #lines, "item(s), total", total .. "c",
-        "| basis=" .. ((DB and DB.ahSuggest) and "AH" or "vendor"))
+        "| basis=" .. PriceMode())
 end
 
 local function LootAssistClick(self)
@@ -2518,6 +2550,14 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         if DB.autoSell == nil then DB.autoSell = false end       -- vendor auto-sell of marked items (opt-in)
         if DB.containerAssist == nil then DB.containerAssist = true end   -- full-bag container opening
         if DB.devMode == nil then DB.devMode = false end         -- Debug tab is hidden until /dgjunk dev
+        -- The "Suggest by AH prices" checkbox became a three-way price basis.
+        -- Someone who had it ON asked for AH prices to count, so they get "best"
+        -- - the same intent, done properly - rather than being silently dropped
+        -- back to vendor. OFF was the shipped default, not a decision, so it
+        -- falls through to the new default like a fresh install.
+        if DB.priceMode == nil and DB.ahSuggest then DB.priceMode = "best" end
+        DB.ahSuggest = nil
+        if DB.priceMode == nil then DB.priceMode = "vendor" end   -- vendor sell price only
         DB.scale = DB.scale or 1
         if DB.minimap == nil then DB.minimap = true end          -- minimap button on by default
         if DB.showFrames == nil then DB.showFrames = true end    -- master frame visibility
@@ -2997,6 +3037,104 @@ BuildConfig = function()
         end
         return cb
     end
+
+    -- A labelled dropdown built to the same contract as Check() above: it reports
+    -- the vertical space it used, translates its ENGLISH keys at display time, and
+    -- exposes .Refresh so it can live in config.checks and be refreshed with them.
+    -- `entries` is a list of { key = <stored value>, label = <English key> }.
+    local function Picker(label, entries, getFn, setFn, tip, enableFn, offTip)
+        local function Name(key)
+            for _, e in ipairs(entries) do if e.key == key then return L[e.label] end end
+            return L[entries[1].label]
+        end
+        local hdr = sp:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        hdr:SetPoint("TOPLEFT", 8, spY)
+        hdr:SetText(L[label])
+        spY = spY - 20
+
+        local widget
+        local function Pick(key)
+            setFn(key)
+            act("setting", nil, label .. " = " .. tostring(key))
+            if widget and widget.Refresh then widget.Refresh() end
+        end
+        local function BuildMenu(_, root)
+            for _, e in ipairs(entries) do
+                root:CreateRadio(L[e.label],
+                    function() return getFn() == e.key end,
+                    function() Pick(e.key) end)
+            end
+        end
+
+        -- Same widget story as the language picker further down: 1.15.9's
+        -- DropdownButton when the client has it, a plain button plus context menu
+        -- when it does not.
+        local isDropdown = false
+        local ok, dd = pcall(CreateFrame, "DropdownButton", nil, sp, "WowStyle1DropdownTemplate")
+        if ok and dd and dd.SetupMenu then
+            dd:SetSize(190, 24)
+            dd:SetupMenu(BuildMenu)
+            widget, isDropdown = dd, true
+        else
+            widget = ConfigBtn(sp, L[label] .. ": " .. Name(getFn()), 190, function(self)
+                if MenuUtil and MenuUtil.CreateContextMenu then
+                    MenuUtil.CreateContextMenu(self, BuildMenu)
+                else
+                    -- no menu API at all: cycle through the entries in order
+                    local cur, nxt = getFn(), entries[1].key
+                    for i, e in ipairs(entries) do
+                        if e.key == cur then nxt = entries[(i % #entries) + 1].key end
+                    end
+                    Pick(nxt)
+                end
+            end)
+        end
+        widget:SetPoint("TOPLEFT", 6, spY)
+        spY = spY - 28
+
+        -- Description line, reserving the taller of the two texts for the same
+        -- reason Check() does: Refresh swaps them when Auctionator comes or goes.
+        local d = sp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        d:SetPoint("TOPLEFT", 10, spY)
+        d:SetWidth(PANEL_W - 20)
+        d:SetJustifyH("LEFT")
+        d:SetWordWrap(true)
+        d:SetText(L[tip])
+        local h = math.ceil(d:GetStringHeight())
+        if offTip then
+            d:SetText(L[offTip])
+            h = math.max(h, math.ceil(d:GetStringHeight()))
+            d:SetText(L[tip])
+        end
+        d:SetHeight(h)
+        spY = spY - h - 10
+
+        widget.Refresh = function()
+            local name = Name(getFn())
+            if isDropdown then
+                widget:SetDefaultText(name)
+                if widget.GenerateMenu then widget:GenerateMenu() end
+            else
+                widget:SetText(L[label] .. ": " .. name)
+            end
+            if not enableFn then return end
+            -- Without Auctionator every mode collapses to vendor prices, so the
+            -- picker is shown disabled rather than hidden: the reason belongs on
+            -- screen, otherwise "AH only" silently doing nothing looks like a bug.
+            if enableFn() then
+                widget:Enable()
+                hdr:SetTextColor(1, 0.82, 0)                   -- GameFontNormal yellow
+                d:SetText(L[tip]); d:SetTextColor(0.5, 0.5, 0.5)
+            else
+                widget:Disable()
+                hdr:SetTextColor(0.5, 0.5, 0.5)
+                d:SetText(L[offTip or tip]); d:SetTextColor(0.9, 0.35, 0.35)
+            end
+        end
+        widget.Refresh()
+        return widget
+    end
+
     config.checks = {}
     config.checks.loot = Check("Loot-assist",
         function() return DB.lootAssist ~= false end,
@@ -3010,12 +3148,12 @@ BuildConfig = function()
         function() return DB.lootColor ~= false end,
         function(v) DB.lootColor = v; ColorLootRows() end,
         "Tints the loot window green (worth more than the cheapest thing you would delete) or red (skip it), only while your bags are full")
-    config.checks.ah = Check("Suggest by AH prices",
-        function() return DB.ahSuggest end,
-        function(v) DB.ahSuggest = v; Update() end,
-        "Rank by Auctionator AH value instead of vendor (falls back to vendor)",
+    config.checks.ah = Picker("Price basis", PRICE_MODES,
+        PriceMode,
+        function(v) DB.priceMode = v; Update() end,
+        "What the recommendation is worth-ranked by. Best of both takes whichever of vendor and AH price is higher for each item - what you could actually get for it.",
         HasAuctionator,
-        "Requires Auctionator (not installed / not detected) - ranking uses vendor prices")
+        "Requires Auctionator (not installed / not detected) - the recommendation uses vendor prices")
     config.checks.show = Check("Show item frames",
         function() return DB.showFrames ~= false end,
         function(v) DB.showFrames = v; Update() end,
