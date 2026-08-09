@@ -8,7 +8,7 @@ Standalone, no libraries required. [Auctionator](https://www.curseforge.com/wow/
 - **Icon interactions.** Shift-left-click deletes, shift-right-click ignores, right-click opens a context menu (mark/unmark as junk, delete, ignore, settings). Grays go instantly, whites raise Blizzard's confirm, green or better asks once more and names the rarity in its own colour.
 - **Loot verdict.** Hovering an item in the loot window says *Loot it* or *Skip*, judged against the cheapest thing you would have to discard. Quest items always read **Quest item: Take it!**
 - **Coloured loot rows.** The loot window is tinted per row, green when the item beats your cheapest junk, red when it does not, so you can read the whole window at a glance without hovering anything.
-- **Full bags?** Clicking a loot item with no free slot opens a pick-an-item dialog: the loot on the left, your cheapest junk and cheapest non-junk on the right with both vendor and AH prices, the cheaper one recommended. Limited to Common quality and below, so the deletion is instant. Not the item you wanted to lose? Page through the next-cheapest with the arrows either side of an icon or the mouse wheel over it, up to ten per side, always starting at the cheapest and stopping at both ends. Each item appears once rather than once per bag slot, and you are offered its smallest stack. Right-click an item there to ignore it instead.
+- **Full bags?** Clicking a loot item with no free slot opens a pick-an-item dialog: the loot on the left, your cheapest junk and cheapest non-junk on the right with both vendor and AH prices. The one to give up is framed red and carries a bin marker, so the colour tells you what the action is rather than whether the outcome is good. Limited to Common quality and below, so the deletion is instant. Not the item you wanted to lose? Page through the next-cheapest with the arrows either side of an icon or the mouse wheel over it, up to ten per side, always starting at the cheapest and stopping at both ends. Each item appears once rather than once per bag slot, and you are offered its smallest stack. Right-click an item there to ignore it instead.
 - **Opening things with full bags.** A container you are looting (a clam, a lockbox) is never offered as the item to destroy: it stays in your bag until its contents are taken, and destroying it would take them with it. Nor is anything the game has locked. Should a container refuse to open at all for want of a slot, the same pick-an-item dialog appears and the container is opened for you once a slot is free.
 - **Junk-coin overlay.** Items you marked get a small coin in the bag slot corner. Works with Bagnon and the default bags, and never overwrites rarity borders.
 - **Vendor auto-sell** (opt-in, off by default). Sells only items you marked yourself, and only above gray quality, so it can never fight another gray-seller.
@@ -21,11 +21,13 @@ Quest items are never suggested, never auto-sold and never deletable, even if ma
 
 ## Worth calculation
 
-Items are ranked by real worth: vendor price, or the Auctionator AH price when *Suggest by AH* is enabled and data exists. Both sides of the comparison are measured as a **stack total**, because a bag slot holds a whole stack: destroying a slot costs you all of it, and looting one gains you all of it. A stack of 4 meat is judged as 4, against the full value of the stack you would discard.
+Items are ranked by real worth, on a **price basis** you pick in the settings. **Vendor only** (the default) uses the merchant's sell price and needs no Auctionator data. **Best of both** takes whichever of vendor and AH is higher for that item, which is what you could really get for it, and is what stops a 1c vendor item worth 12s at auction from being picked as the cheapest thing to destroy. **AH only** uses the auction price and falls back to vendor where there is none. Every basis falls back to vendor prices when Auctionator is not installed, and the picker greys out and says so. Whichever you pick, both numbers stay on screen: the setting decides what ranks, not what you get to see.
+
+Both sides of the comparison are measured as a **stack total**, because a bag slot holds a whole stack: destroying a slot costs you all of it, and looting one gains you all of it. A stack of 4 meat is judged as 4, against the full value of the stack you would discard.
 
 ## Slash command
 
-`/dgjunk` opens the settings window. Loot-assist, suggest-by-AH, auto-sell, minimap button, frame scale, profiles and debug logging all live in there.
+`/dgjunk` opens the settings window. Loot-assist, the price basis, auto-sell, minimap button, frame scale, profiles and debug logging all live in there.
 
 ## Compatibility
 

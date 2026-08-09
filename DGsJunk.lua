@@ -429,12 +429,11 @@ end
 --   totalValue - worthEach * count (rank/sort by this: least valuable stack first)
 --   vendorEach - per-item vendor sell price (for the icon's Vendor line)
 --   worthEach  - per-item value actually used
---   source     - "vendor" or "ah", whichever produced worthEach
 local function Worth(id, count)
     local stackMax, _, _, price = select(8, GetItemInfo(id))   -- 8=stackMax .. 11=sellPrice
     if not stackMax then return nil end                        -- item info not cached yet
     local vendorEach = price or 0
-    local worthEach, source = vendorEach, "vendor"
+    local worthEach = vendorEach
     local mode = PriceMode()
     if mode ~= "vendor" then
         local ah = AHPrice(id)
@@ -442,10 +441,10 @@ local function Worth(id, count)
         -- actually beats the vendor, so an underpriced auction can never talk you
         -- into destroying the item that was worth more at the merchant.
         if ah and ah > 0 and (mode == "ah" or ah > vendorEach) then
-            worthEach, source = ah, "ah"
+            worthEach = ah
         end
     end
-    return worthEach * (count or 1), vendorEach, worthEach, source
+    return worthEach * (count or 1), vendorEach, worthEach
 end
 
 -- Single bag scan -> cheapest junk item, and cheapest qualifying non-junk item.

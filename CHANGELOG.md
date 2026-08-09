@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.4.0
+
+Pricing you can act on, and a dialog that says what it means.
+
+- **A price basis you choose**, replacing the old *Suggest by AH prices* checkbox. Pick **Vendor
+  only** (the default, and no Auctionator needed), **Best of both**, or **AH only**. The old
+  checkbox made the AH price *replace* the vendor price, so whichever channel was cheaper decided
+  what to destroy, and that is never the channel you would have used. Best of both takes the higher
+  of the two for each item instead: a 1c vendor item that sells for 12s at auction is no longer the
+  cheapest thing in your bags. Had the old checkbox on? You are moved to Best of both, since that
+  is what you were asking for.
+- **The comparison dialog says which item to destroy.** Green used to mean *take this* on the loot
+  side and *destroy this* on the candidate side, and the word was *recommended*, which reads like
+  something to keep. The slot to give up is now framed red with a marker in its corner and the words
+  **delete this**. Colour means the action from here on, so a candidate you paged past keeps only
+  its red warning text and drops back to a neutral frame.
+- Both prices stay on screen whatever basis you rank by. The setting decides what counts, not what
+  you get to see, and the picker greys itself out with a reason when Auctionator is missing.
+
 ## 1.3.0
 
 Opening things with full bags.

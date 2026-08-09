@@ -41,8 +41,10 @@ auction-house value. Hover for the item tooltip and the available actions.
   more than your cheapest junk, red when it is not, so you can read the whole window at a glance
   without hovering anything.
 - **Full bags?** Clicking a loot item with no free slot opens a pick-an-item dialog: the loot on
-  the left, your cheapest junk and cheapest non-junk on the right with both prices, the cheaper one
-  recommended. Limited to Common quality and below, so the deletion is instant.
+  the left, your cheapest junk and cheapest non-junk on the right with both prices. The one to give
+  up is framed red and carries a bin marker: colour says what the action is, not whether the outcome
+  is good, so the green frame on the left never has to mean two things. Limited to Common quality and
+  below, so the deletion is instant.
   - Not the item you wanted to lose? Page through the next-cheapest ones with the arrows either
     side of an icon, or the mouse wheel over it, up to ten per side. It opens on the cheapest and
     stops at both ends, so nothing wraps round to something expensive.
@@ -101,8 +103,20 @@ Quest items are never suggested, never auto-sold and never deletable, even if ma
 
 ## Worth calculation
 
-Items are ranked by real worth: vendor price, or the Auctionator AH price when *Suggest by AH* is
-enabled and data exists. Both sides of the comparison are measured as a **stack total**, because a
+Items are ranked by real worth, on a **price basis** you pick in the settings:
+
+| Basis | Ranks by |
+|---|---|
+| **Vendor only** (default) | the merchant's sell price, no Auctionator data needed |
+| **Best of both** | whichever of vendor and AH is higher for that item, which is what you could really get for it |
+| **AH only** | the Auctionator price, falling back to vendor where there is none |
+
+Best of both is the one that stops a 1c vendor item worth 12s at auction from being picked as the
+cheapest thing to destroy. Every basis falls back to vendor prices when Auctionator is not installed,
+and the picker greys out and says so. Whichever you pick, both numbers stay on screen: the setting
+decides what ranks, not what you get to see.
+
+Both sides of the comparison are measured as a **stack total**, because a
 bag slot holds a whole stack: destroying a slot costs you all of it, and looting one gains you all
 of it. A stack of 4 meat is judged as 4, against the full value of the stack you would discard.
 
@@ -117,7 +131,7 @@ Loot-assist, debug logging and clearing the log are toggled inside that window
 
 ## Settings window
 
-- **Settings** (opens here), loot-assist, container assist, colour loot rows, suggest-by-AH, show item frames,
+- **Settings** (opens here), loot-assist, container assist, colour loot rows, price basis, show item frames,
   always-show, minimap button, auto-sell, frame scale, the profile dropdown and its copy buttons,
   reset icon position.
 - **Ignored**, manage the ignore list (remove individual entries, or reset Junk / Normal / All).
